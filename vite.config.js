@@ -1,16 +1,15 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
-// Local-only admin tool - the API lives on a separate small Express
-// server (server/index.mjs) since PDF parsing (pdfjs-dist) and the WP
-// Application Password credentials both need to stay server-side, never
-// shipped to the browser. Proxied under /api the same way the main
-// lach-hockey-app proxies to lach.lv in dev.
+// Packaged as an Electron app now - no more separate API server, so
+// nothing to proxy. Relative asset paths (base: './') matter for the
+// packaged build: electron/main.mjs loads dist/index.html via
+// loadFile(), a file:// URL, not served from a domain root - an
+// absolute base ('/') would 404 every asset under file://.
 export default defineConfig({
+  base: './',
   plugins: [react()],
   server: {
-    proxy: {
-      '/api': 'http://localhost:8787',
-    },
+    port: 5174,
   },
 })
