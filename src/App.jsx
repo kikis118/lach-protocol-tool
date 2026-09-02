@@ -183,6 +183,9 @@ export default function App() {
                     <p className="text-ink-faint text-xs mt-1">
                       Ja izvēlēta sezona, protokols tiks meklēts tikai tajā - precīzāk un ātrāk.
                     </p>
+                    <p className="text-ink-faint text-xs mt-1">
+                      Ja neredzi pareizo sezonu vai turnīru, vienkārši atstāj "Visas sezonas".
+                    </p>
                   </div>
                 )}
 

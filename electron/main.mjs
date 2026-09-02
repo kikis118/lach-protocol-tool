@@ -246,30 +246,42 @@ ipcMain.handle('game:save', async (_event, { gameId, payload }) => {
 // 1 (plain "regular season" shape) - a subtourney game isn't part of
 // any bracket.
 
-// Every season's own "Regular Season" stage (never Play-off/Play-Off) -
-// so a walk-in game can never accidentally get filed as a playoff game.
-// Derived from the games already on file for that season, not guessed.
-function deriveSeasonCombos(games, seasons, tournaments, stages) {
-  const bySeason = {}
-  games.forEach((g) => {
-    const stageName = stages[g.stage_id]
-    if (stageName !== 'Regular Season' || bySeason[g.season_id]) return
-    bySeason[g.season_id] = {
-      seasonId: g.season_id,
-      seasonName: seasons[g.season_id] || `Season ${g.season_id}`,
-      tournamentId: g.tournament_id,
-      tournamentName: tournaments[g.tournament_id] || '',
-      stageId: g.stage_id,
-      leagueId: g.league_id,
-    }
+// Every top-level tournament's own "Regular Season" stage (never
+// Play-off/Play-Off) - so a walk-in game can never accidentally get filed
+// as a playoff game. Built from `all_tournaments`/`all_seasons`/
+// `all_leagues` (every tournament that exists in WP, via its real
+// sl_season/sl_league taxonomy terms - confirmed 2026-09-03 via
+// /diag/post-terms that this is a term relationship, not postmeta),
+// NOT from games already on file - a brand-new tournament with zero
+// games would otherwise never appear here (hit twice: the 2026/2027
+// launch, and a "test" season with no games). Keyed by tournament (not
+// season) since a season can hold more than one tournament/league at
+// once - a season-only key would silently hide every tournament but the
+// first one seen for that season.
+function deriveSeasonCombos(allTournaments, allSeasons, allLeagues) {
+  const combos = []
+  Object.entries(allTournaments || {}).forEach(([idStr, t]) => {
+    if (t.parent_id) return // only top-level tournaments, not stages
+    if (!t.season_id) return // no season assigned yet - nothing safe to file under
+    const tournamentId = Number(idStr)
+    const stageEntries = Object.entries(allTournaments).filter(([, c]) => c.parent_id === tournamentId)
+    const regularStage = stageEntries.find(([, c]) => c.title === 'Regular Season')
+    combos.push({
+      seasonId: t.season_id,
+      seasonName: (allSeasons || {})[t.season_id] || `Season ${t.season_id}`,
+      tournamentId,
+      tournamentName: t.title,
+      stageId: regularStage ? Number(regularStage[0]) : tournamentId,
+      leagueId: t.league_id,
+    })
   })
-  return Object.values(bySeason).sort((a, b) => b.seasonId - a.seasonId)
+  return combos.sort((a, b) => b.seasonId - a.seasonId || a.tournamentName.localeCompare(b.tournamentName))
 }
 
 ipcMain.handle('lookups:get', async () => {
   const data = await fetchFullData()
   return {
-    seasonCombos: deriveSeasonCombos(data.games || [], data.seasons || {}, data.tournaments || {}, data.stages || {}),
+    seasonCombos: deriveSeasonCombos(data.all_tournaments || {}, data.all_seasons || {}, data.all_leagues || {}),
     teams: Object.entries(data.teams || {}).map(([id, name]) => ({ id, name })),
     venues: Object.entries(data.venues || {}).map(([id, name]) => ({ id, name })),
   }
