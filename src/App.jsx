@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { pickPdf, parseProtocol, saveGame, getCredentials, openExternal, getLookups, checkForUpdates } from './api'
+import { pickPdf, parseProtocol, saveGame, getCredentials, openExternal, getLookups, checkForUpdates, getUpdateStatus, installUpdate, onUpdateStatus } from './api'
 import GamePicker from './components/GamePicker'
 import PreviewGame from './components/PreviewGame'
 import CreateNewGame from './components/CreateNewGame'
@@ -23,14 +23,19 @@ export default function App() {
 
   // Update state lives here (not just inside a header widget) so a
   // prominent banner can show the moment the app opens, per the
-  // explicit ask - not something buried behind a click.
-  const [updateChecking, setUpdateChecking] = useState(false)
-  const [updateInfo, setUpdateInfo] = useState(null)
-  const [updateError, setUpdateError] = useState(null)
+  // explicit ask - not something buried behind a click. Driven by
+  // electron-updater's real event stream (checking/downloading/
+  // downloaded/error), pushed from the main process as it happens
+  // rather than polled - `runUpdateCheck` just kicks a check off, the
+  // subscription below is what actually updates this state.
+  const [updateStatus, setUpdateStatus] = useState({ state: 'idle' })
 
   useEffect(() => {
     getCredentials().then(setCredentialsState)
+    const unsubscribe = onUpdateStatus(setUpdateStatus)
+    getUpdateStatus().then(setUpdateStatus)
     runUpdateCheck()
+    return unsubscribe
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -40,16 +45,8 @@ export default function App() {
     }
   }, [credentials])
 
-  async function runUpdateCheck() {
-    setUpdateChecking(true)
-    setUpdateError(null)
-    try {
-      setUpdateInfo(await checkForUpdates())
-    } catch (err) {
-      setUpdateError(err.message)
-    } finally {
-      setUpdateChecking(false)
-    }
+  function runUpdateCheck() {
+    checkForUpdates().then(setUpdateStatus)
   }
 
   async function handlePick() {
@@ -118,7 +115,7 @@ export default function App() {
             LACH <span className="text-accent">Protokolu Rīks</span>
           </h1>
           <div className="flex items-center gap-4">
-            <UpdateBadge checking={updateChecking} info={updateInfo} error={updateError} onRecheck={runUpdateCheck} />
+            <UpdateBadge status={updateStatus} onRecheck={runUpdateCheck} />
             {hasCredentials && (
               <button
                 type="button"
@@ -132,15 +129,24 @@ export default function App() {
         </div>
       </header>
 
-      {updateInfo?.hasUpdate && (
+      {updateStatus.state === 'downloading' && (
         <div className="bg-accent text-ink px-4 py-3 flex flex-wrap items-center justify-center gap-3 font-bold text-sm">
-          <span>🔔 Pieejama jauna versija: {updateInfo.latestVersion} (tev: {updateInfo.currentVersion})</span>
+          <span>
+            ⬇ Lejupielādē atjauninājumu {updateStatus.version}
+            {typeof updateStatus.percent === 'number' ? ` (${updateStatus.percent}%)` : '...'}
+          </span>
+        </div>
+      )}
+
+      {updateStatus.state === 'downloaded' && (
+        <div className="bg-accent text-ink px-4 py-3 flex flex-wrap items-center justify-center gap-3 font-bold text-sm">
+          <span>🔔 Versija {updateStatus.version} lejupielādēta un gatava uzstādīšanai</span>
           <button
             type="button"
-            onClick={() => openExternal(updateInfo.releaseUrl)}
+            onClick={() => installUpdate()}
             className="bg-ink text-accent px-4 py-1.5 rounded-md uppercase text-xs tracking-wide hover:bg-gray-200 transition-colors"
           >
-            Lejupielādēt →
+            Restartēt un uzstādīt →
           </button>
         </div>
       )}

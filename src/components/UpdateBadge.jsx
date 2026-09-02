@@ -1,16 +1,19 @@
 // Header control for the update check - a real, visible label (was
 // icon-only before, which wasn't obvious what it did) plus the same
-// icon and red-dot badge. The full-width banner in App.jsx is still the
-// prominent "there's an update" notice; this is just the always-visible
-// "check now" affordance, made unambiguous with its own text.
-export default function UpdateBadge({ checking, info, error, onRecheck }) {
-  const hasUpdate = info?.hasUpdate
+// icon and red-dot badge. Now reflects electron-updater's real states
+// (downloading/downloaded/error), not just "is a newer tag published" -
+// the full-width banner in App.jsx still owns the prominent
+// download-progress/restart-to-install notices; this is just the
+// always-visible "check now" affordance plus a short status label.
+export default function UpdateBadge({ status, onRecheck }) {
+  const checking = status?.state === 'checking'
+  const hasUpdate = status?.state === 'downloading' || status?.state === 'downloaded'
 
   let statusText = null
-  if (error) statusText = `Neizdevās pārbaudīt: ${error}`
-  else if (info?.hasUpdate) statusText = `Pieejama versija ${info.latestVersion}`
-  else if (info?.latestVersion) statusText = 'Jaunākā versija ✓'
-  else if (info) statusText = 'Nav publicēta neviena versija'
+  if (status?.state === 'error') statusText = `Neizdevās pārbaudīt: ${status.message}`
+  else if (status?.state === 'downloading') statusText = `Lejupielādē ${status.version}...`
+  else if (status?.state === 'downloaded') statusText = `Versija ${status.version} gatava uzstādīšanai`
+  else if (status?.state === 'not-available') statusText = 'Jaunākā versija ✓'
 
   return (
     <button

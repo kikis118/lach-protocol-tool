@@ -43,3 +43,15 @@ export function createNewGameSave(args) {
 export function checkForUpdates() {
   return window.lachTool.checkForUpdates()
 }
+
+export function getUpdateStatus() {
+  return window.lachTool.getUpdateStatus()
+}
+
+export function installUpdate() {
+  return window.lachTool.installUpdate()
+}
+
+export function onUpdateStatus(callback) {
+  return window.lachTool.onUpdateStatus(callback)
+}

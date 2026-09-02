@@ -15,6 +15,10 @@
 // per-repo-checkout.
 
 import { app, BrowserWindow, ipcMain, dialog, shell } from 'electron'
+// electron-updater is CommonJS - under ESM it only has a default export,
+// not the named `autoUpdater` export its own docs show.
+import electronUpdater from 'electron-updater'
+const { autoUpdater } = electronUpdater
 import path from 'path'
 import fs from 'fs'
 import { fileURLToPath } from 'url'
@@ -27,12 +31,6 @@ import { buildNewGamePreview } from './lib/buildNewGamePreview.mjs'
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const WP_API = 'https://lach.lv/wp-json/lach/v1'
 const isDev = !app.isPackaged
-// Public GitHub API - no token needed, which is exactly why the repo
-// needs to stay public: embedding any token in a distributed app is
-// extractable from the binary, a real credential-leak risk regardless
-// of how narrow its scope is. A private repo's release info simply
-// can't be checked here without that risk.
-const GITHUB_REPO = 'kikis118/lach-protocol-tool'
 
 function credentialsPath() {
   return path.join(app.getPath('userData'), 'credentials.json')
@@ -130,6 +128,15 @@ if (!gotLock) {
 
   app.whenReady().then(() => {
     createWindow()
+    // Real update path: electron-updater reads the same `build.publish`
+    // GitHub config already used to auto-publish releases (see
+    // package.json) via an `app-update.yml` electron-builder embeds into
+    // the packaged app - no separate feed URL to maintain by hand. Only
+    // meaningful in a packaged build - it refuses to run against an
+    // unpacked dev checkout (no installer to compare against), so dev
+    // mode never calls it; real verification happens the same way every
+    // other change here has - install a real build and watch it update.
+    if (!isDev) autoUpdater.checkForUpdates().catch(() => {})
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow()
     })
@@ -139,6 +146,35 @@ if (!gotLock) {
     if (process.platform !== 'darwin') app.quit()
   })
 }
+
+// --- Auto-update ---------------------------------------------------------
+//
+// Downloads silently in the background the moment a newer release is
+// found (autoDownload) and waits for the admin to explicitly restart
+// (autoInstallOnAppQuit: false, quitAndInstall only called from
+// updates:install) rather than surprising them mid-task by relaunching
+// on its own. Status is pushed to the renderer as it changes rather than
+// polled, since the interesting states (downloading, downloaded) happen
+// on their own schedule, not in response to a click.
+
+autoUpdater.autoDownload = true
+autoUpdater.autoInstallOnAppQuit = false
+
+let updateStatus = { state: 'idle' }
+
+function setUpdateStatus(status) {
+  updateStatus = status
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('updates:status', { ...updateStatus, currentVersion: app.getVersion() })
+  }
+}
+
+autoUpdater.on('checking-for-update', () => setUpdateStatus({ state: 'checking' }))
+autoUpdater.on('update-available', (info) => setUpdateStatus({ state: 'downloading', version: info.version, percent: 0 }))
+autoUpdater.on('update-not-available', () => setUpdateStatus({ state: 'not-available' }))
+autoUpdater.on('download-progress', (progress) => setUpdateStatus({ state: 'downloading', percent: Math.round(progress.percent) }))
+autoUpdater.on('update-downloaded', (info) => setUpdateStatus({ state: 'downloaded', version: info.version }))
+autoUpdater.on('error', (err) => setUpdateStatus({ state: 'error', message: err?.message || String(err) }))
 
 // --- IPC handlers -----------------------------------------------------
 
@@ -337,44 +373,21 @@ ipcMain.handle('game:createNewSave', async (_event, { seasonCombo, homeTeamId, a
 
 // --- Update check -------------------------------------------------------
 //
-// Deliberately just a CHECK, not a full auto-updater (electron-updater +
-// silent background download/install) - that needs a signed build and a
-// consistently-published release feed to be safe/reliable, neither of
-// which exists yet. This only tells the admin a newer version exists and
-// links to the GitHub release to download by hand, same manual install
-// flow as today, just with a nudge instead of needing to remember to check.
-
-function parseVersion(v) {
-  return (v || '').replace(/^v/, '').split('.').map((n) => parseInt(n, 10) || 0)
-}
-
-function isNewer(latest, current) {
-  const a = parseVersion(latest)
-  const b = parseVersion(current)
-  for (let i = 0; i < Math.max(a.length, b.length); i++) {
-    const diff = (a[i] || 0) - (b[i] || 0)
-    if (diff !== 0) return diff > 0
-  }
-  return false
-}
-
 ipcMain.handle('updates:check', async () => {
-  const currentVersion = app.getVersion()
-  const res = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/releases/latest`, {
-    headers: { Accept: 'application/vnd.github+json' },
-  })
-  if (res.status === 404) {
-    // No release published yet - not an error, just nothing to compare
-    // against (see README's "how to publish a release" notes).
-    return { currentVersion, latestVersion: null, hasUpdate: false, releaseUrl: null }
+  if (isDev) {
+    setUpdateStatus({ state: 'not-available' })
+    return { ...updateStatus, currentVersion: app.getVersion() }
   }
-  if (!res.ok) throw new Error(`GitHub API: HTTP ${res.status}`)
-  const release = await res.json()
-  const latestVersion = release.tag_name
-  return {
-    currentVersion,
-    latestVersion,
-    hasUpdate: isNewer(latestVersion, currentVersion),
-    releaseUrl: release.html_url,
+  try {
+    await autoUpdater.checkForUpdates()
+  } catch (err) {
+    setUpdateStatus({ state: 'error', message: err?.message || String(err) })
   }
+  return { ...updateStatus, currentVersion: app.getVersion() }
+})
+
+ipcMain.handle('updates:status', () => ({ ...updateStatus, currentVersion: app.getVersion() }))
+
+ipcMain.handle('updates:install', () => {
+  autoUpdater.quitAndInstall()
 })

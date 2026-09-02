@@ -14,4 +14,15 @@ contextBridge.exposeInMainWorld('lachTool', {
   createNewGamePreview: (args) => ipcRenderer.invoke('game:createNewPreview', args),
   createNewGameSave: (args) => ipcRenderer.invoke('game:createNewSave', args),
   checkForUpdates: () => ipcRenderer.invoke('updates:check'),
+  getUpdateStatus: () => ipcRenderer.invoke('updates:status'),
+  installUpdate: () => ipcRenderer.invoke('updates:install'),
+  // contextBridge deep-freezes exposed VALUES, not functions - this
+  // closure-based subscribe (rather than exposing ipcRenderer.on
+  // directly) is what a frozen object can still safely offer, and
+  // returns its own unsubscribe so a component can clean up on unmount.
+  onUpdateStatus: (callback) => {
+    const listener = (_event, status) => callback(status)
+    ipcRenderer.on('updates:status', listener)
+    return () => ipcRenderer.removeListener('updates:status', listener)
+  },
 })
