@@ -28,6 +28,7 @@
   "build": {
     "appId": "lv.lach.protokolu-riks",
     "productName": "LACH Protokolu Rīks",
+    "artifactName": "LACH-Protokolu-Riks-Setup.${ext}",
     "files": [
       "dist/**/*",
       "electron/**/*",
