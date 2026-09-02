@@ -29,6 +29,11 @@
     "appId": "lv.lach.protokolu-riks",
     "productName": "LACH Protokolu Rīks",
     "artifactName": "LACH-Protokolu-Riks-Setup.${ext}",
+    "publish": {
+      "provider": "github",
+      "owner": "kikis118",
+      "repo": "lach-protocol-tool"
+    },
     "files": [
       "dist/**/*",
       "electron/**/*",
