@@ -13,4 +13,5 @@ contextBridge.exposeInMainWorld('lachTool', {
   getLookups: () => ipcRenderer.invoke('lookups:get'),
   createNewGamePreview: (args) => ipcRenderer.invoke('game:createNewPreview', args),
   createNewGameSave: (args) => ipcRenderer.invoke('game:createNewSave', args),
+  checkForUpdates: () => ipcRenderer.invoke('updates:check'),
 })

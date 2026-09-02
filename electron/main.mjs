@@ -27,6 +27,12 @@ import { buildNewGamePreview } from './lib/buildNewGamePreview.mjs'
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const WP_API = 'https://lach.lv/wp-json/lach/v1'
 const isDev = !app.isPackaged
+// Public GitHub API - no token needed, which is exactly why the repo
+// needs to stay public: embedding any token in a distributed app is
+// extractable from the binary, a real credential-leak risk regardless
+// of how narrow its scope is. A private repo's release info simply
+// can't be checked here without that risk.
+const GITHUB_REPO = 'kikis118/lach-protocol-tool'
 
 function credentialsPath() {
   return path.join(app.getPath('userData'), 'credentials.json')
@@ -310,4 +316,48 @@ ipcMain.handle('game:createNewSave', async (_event, { seasonCombo, homeTeamId, a
   const body = await res.json()
   if (!res.ok) throw new Error(body.error || body.message || `HTTP ${res.status}`)
   return body
+})
+
+// --- Update check -------------------------------------------------------
+//
+// Deliberately just a CHECK, not a full auto-updater (electron-updater +
+// silent background download/install) - that needs a signed build and a
+// consistently-published release feed to be safe/reliable, neither of
+// which exists yet. This only tells the admin a newer version exists and
+// links to the GitHub release to download by hand, same manual install
+// flow as today, just with a nudge instead of needing to remember to check.
+
+function parseVersion(v) {
+  return (v || '').replace(/^v/, '').split('.').map((n) => parseInt(n, 10) || 0)
+}
+
+function isNewer(latest, current) {
+  const a = parseVersion(latest)
+  const b = parseVersion(current)
+  for (let i = 0; i < Math.max(a.length, b.length); i++) {
+    const diff = (a[i] || 0) - (b[i] || 0)
+    if (diff !== 0) return diff > 0
+  }
+  return false
+}
+
+ipcMain.handle('updates:check', async () => {
+  const currentVersion = app.getVersion()
+  const res = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/releases/latest`, {
+    headers: { Accept: 'application/vnd.github+json' },
+  })
+  if (res.status === 404) {
+    // No release published yet - not an error, just nothing to compare
+    // against (see README's "how to publish a release" notes).
+    return { currentVersion, latestVersion: null, hasUpdate: false, releaseUrl: null }
+  }
+  if (!res.ok) throw new Error(`GitHub API: HTTP ${res.status}`)
+  const release = await res.json()
+  const latestVersion = release.tag_name
+  return {
+    currentVersion,
+    latestVersion,
+    hasUpdate: isNewer(latestVersion, currentVersion),
+    releaseUrl: release.html_url,
+  }
 })

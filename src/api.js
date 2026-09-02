@@ -39,3 +39,7 @@ export function createNewGamePreview(args) {
 export function createNewGameSave(args) {
   return window.lachTool.createNewGameSave(args)
 }
+
+export function checkForUpdates() {
+  return window.lachTool.checkForUpdates()
+}

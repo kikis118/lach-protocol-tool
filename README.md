@@ -1,60 +1,56 @@
 # LACH Protokolu Rīks
 
-Desktop app for uploading LHL game protocol PDFs straight into
-[lach.lv](https://lach.lv) WordPress: pick a PDF, it's matched to the
-right game automatically, you review a full preview (score, box score,
-goals, penalties), then either save it or jump to WP-Admin to fix
-anything by hand. Also handles walk-in games that don't exist in
-WordPress yet.
+Programma spēles protokolu (PDF) augšupielādei tieši [lach.lv](https://lach.lv)
+WordPress vietnē: izvēlies PDF failu, tas tiek automātiski sasaistīts ar
+īsto spēli, tu pārbaudi priekšskatījumu (rezultāts, spēlētāju statistika,
+vārti, sodi) un tad vai nu saglabā, vai atver WP-Admin, lai kaut ko
+izlabotu pašrocīgi. Var arī izveidot pilnīgi jaunu spēli, ja tāda
+WordPress vēl nemaz nepastāv.
 
-## Installing (for league admins)
+## Instalēšana
 
-1. Get the latest installer (`LACH Protokolu Rīks Setup X.X.X.exe`) — either from this repo's [Releases page](https://github.com/kikis118/lach-protocol-tool/releases) if one has been published there, or however it was sent to you directly.
-2. Run it. It's a normal one-click installer (no admin rights needed) — it installs for your Windows user only and adds a Start Menu shortcut.
-3. Open "LACH Protokolu Rīks" from the Start Menu.
-4. **First run only**: it'll ask for a WordPress username and an *Application Password* (not your normal login password — these are separate, and each person needs their own):
-   - Log into [lach.lv/wp-admin](https://lach.lv/wp-admin)
-   - Go to **Users → Profile** (your own profile, near the bottom)
-   - Under **Application Passwords**, type a name for it (e.g. "Protokolu rīks") and click **Add New Application Password**
-   - Copy the generated password (looks like `xxxx xxxx xxxx xxxx xxxx xxxx`) into the app, along with your WordPress username
-   - Click **Saglabāt** — that's it, this only needs to happen once per computer
-5. From then on: **Izvēlēties failu** → pick the protocol PDF → review the preview → **Saglabāt spēli**.
+1. Iegūsti jaunāko instalatoru (`LACH Protokolu Rīks Setup X.X.X.exe`) — vai nu no šī repozitorija [Releases lapas](https://github.com/kikis118/lach-protocol-tool/releases), vai kā citādi tas tev tika nosūtīts.
+2. Palaid to. Tas ir parasts vienkāršs instalators (nav vajadzīgas administratora tiesības) — instalē tikai tavam Windows lietotājam un pievieno saīsni Sākuma izvēlnē.
+3. Atver "LACH Protokolu Rīks" no Sākuma izvēlnes.
+4. **Tikai pirmajā reizē**: programma prasīs WordPress lietotājvārdu un *Application Password* (nevis tavu parasto pieslēgšanās paroli — tā ir pavisam cita, un katram cilvēkam vajadzīga sava):
+   - Ielogojies [lach.lv/wp-admin](https://lach.lv/wp-admin)
+   - Ej uz **Users → Profile** (savu profilu, tuvāk lapas apakšai)
+   - Sadaļā **Application Passwords** ievadi kādu nosaukumu (piem., "Protokolu rīks") un uzspied **Add New Application Password**
+   - Iekopē izveidoto paroli (izskatās kā `xxxx xxxx xxxx xxxx xxxx xxxx`) programmā, kopā ar savu lietotājvārdu
+   - Uzspied **Saglabāt** — tas jādara tikai vienu reizi katrā datorā
 
-Nothing about this needs the internet on your end beyond a normal connection to lach.lv — the app itself doesn't run any server or need any port opened. As long as your computer can reach lach.lv normally (the same as browsing to it) and your Application Password is valid, saving writes live, immediately, to the real site — there's no delay, queue, or separate publish step.
+   Programmā ir arī poga "Kā to atrast? Rādīt soli pa solim", kas parāda vizuālu ceļvedi šim solim.
+5. Turpmāk: **Izvēlēties failu** → izvēlies protokola PDF failu → pārbaudi priekšskatījumu → **Saglabāt spēli**.
 
-### Updating
+Nepieciešams tikai parasts interneta pieslēgums līdz lach.lv. Saglabāšana ieraksta datus tiešraidē, uzreiz, īstajā vietnē.
 
-There's no auto-update yet — download and run a newer installer the same way; it replaces the old version in place. Your saved credentials aren't affected by an update.
+### Atjaunināšana
 
-### Uninstalling
+Galvenajā logā ir poga **"Pārbaudīt atjauninājumus"** — salīdzina tavu versiju ar jaunāko publicēto GitHub un parāda saiti lejupielādei, ja ir kaut kas jauns. Jauns instalators jāpalaiž pašrocīgi (aizvieto veco versiju uz vietas, saglabātie pieslēgšanās dati netiek ietekmēti).
 
-Use Windows' normal **Settings → Apps** (or the uninstaller in the Start Menu folder) like any other app.
+### Atinstalēšana
 
-## How matching works
+Izmanto Windows parasto **Settings → Apps** (vai atinstalētāju Sākuma izvēlnes mapē).
 
-The protocol itself has no game ID — the tool reads its printed date and
-both team names, and matches those against lach.lv's own game list (same
-team-name normalization rules as `lach-hockey-app`'s `wp-autofill.mjs`).
-An exact single match proceeds straight to the preview; anything else (0
-or 2+ matches) shows a picker to confirm by hand.
+## Kā darbojas spēles atrašana
 
-## Editing
+Programma nolasa protokolā uzdrukāto datumu un abu komandu nosaukumus un
+salīdzina tos ar lach.lv esošo spēļu sarakstu. Ja atrasta tieši viena
+atbilstoša spēle, atveras priekšskatījums; ja atrastas 0 vai vairākas,
+parādās saraksts, no kura izvēlēties pareizo pašrocīgi.
 
-No inline editing yet — if the parsed preview is wrong, "Rediģēt
-WP-Admin" jumps straight to that game's real WP-Admin edit screen (opens
-in your default browser). The parser has been reliable in practice, so
-this has been the right tradeoff so far: build for the common case
-(parser gets it right, just confirm and save), keep the escape hatch for
-the rare case rather than a full inline editor.
+## Rediģēšana
 
-## Creating a new game (walk-in / subtournament game not in WP yet)
+Ja protokols nolasīts nepareizi, poga "Rediģēt WP-Admin" atver šīs
+spēles rediģēšanas lapu WP-Admin pārlūkprogrammā.
 
-If a protocol doesn't match any existing game, the app offers "Izveidot
-jaunu spēli" instead of a dead end. This is deliberately narrow: an
-EXISTING season/tournament and EXISTING teams/venue must be picked from
-dropdowns — brand-new teams, venues, seasons, or tournaments are always
-a manual wp-admin step first (a direct link is shown for that). Once
-mapped, it creates the game and writes all player stats in one request.
+## Jaunas spēles izveide
+
+Ja protokols neatbilst nevienai esošai spēlei, programma piedāvā
+"Izveidot jaunu spēli": izvēlies esošu sezonu/turnīru un komandas/vietu
+no saraksta (jaunas komandas, vietas, sezonas vai turnīri vienmēr
+jāizveido WP-Admin vispirms), un programma izveidos spēli ar visu
+statistiku uzreiz.
 
 ---
 
@@ -74,28 +70,17 @@ npm run dev:electron  # terminal 2 - Electron window loading that dev server
 npm run dist
 ```
 
-Produces a Windows installer under `release/`. Icon source lives in
-`build/icon.ico` (Windows exe/installer icon) and `build/icon.png` (used
-for the app window icon in dev mode and copied to `public/favicon.png`
-for the browser-tab favicon) — both generated from
-`lach-hockey-app/src/assets/lhl-logo-transparent.png`.
+Produces a Windows installer under `release/`.
+
+### Publishing a release
+
+Tag a version and create a GitHub Release with the built `.exe` from
+`release/` attached — the "Pārbaudīt atjauninājumus" button reads the
+latest release's tag via GitHub's public API. Repo must stay public for
+that API call to work without an embedded token.
 
 ### WordPress-side pieces (in the main `lach-hockey-app` repo's `wp-snippets/`)
 
-- `game-autofill.php` — read/write an EXISTING game's stats (the normal flow)
-- `create-finished-game.php` — create a BRAND NEW finished game + its stats (walk-in flow)
-- `protocol-tool-link.php` — adds an "Ielādēt Protokolu" button to the wp-admin bar, using a `lachprotocol://` link this app registers itself as the handler for once installed (packaged builds only)
-
-### Why this is a desktop app, not a hosted web tool
-
-Originally built as a local Express server + browser tab. When asked to
-make it reachable from anywhere with real WordPress-login gating, it
-turned out the hosting plan behind lach.lv doesn't support Node.js apps,
-and enabling that would mean removing WordPress from that domain
-entirely — not acceptable. Rewriting the PDF parser in PHP (it depends
-on per-character X/Y coordinates from `pdfjs-dist`, not just raw text)
-was ruled out as a disproportionate rewrite for the benefit. Packaging
-as a real installable app — each person supplies their own WordPress
-Application Password — was the option with no new cost, no rewrite, and
-it can be handed to more than one person, unlike the original
-local-only version.
+- `game-autofill.php` — read/write an existing game's stats
+- `create-finished-game.php` — create a new finished game + its stats
+- `protocol-tool-link.php` — adds an "Ielādēt Protokolu" button to the wp-admin bar via a `lachprotocol://` link

@@ -4,6 +4,7 @@ import GamePicker from './components/GamePicker'
 import PreviewGame from './components/PreviewGame'
 import CreateNewGame from './components/CreateNewGame'
 import Setup from './components/Setup'
+import UpdateChecker from './components/UpdateChecker'
 
 export default function App() {
   const [credentials, setCredentialsState] = useState(null) // null = still loading
@@ -72,15 +73,18 @@ export default function App() {
           <h1 className="text-xl font-black uppercase text-ink tracking-wider">
             LACH <span className="text-accent">Protokolu Rīks</span>
           </h1>
-          {hasCredentials && (
-            <button
-              type="button"
-              onClick={() => setShowSettings(true)}
-              className="text-ink-faint text-sm font-semibold hover:text-ink"
-            >
-              Iestatījumi
-            </button>
-          )}
+          <div className="flex items-center gap-4">
+            <UpdateChecker />
+            {hasCredentials && (
+              <button
+                type="button"
+                onClick={() => setShowSettings(true)}
+                className="text-ink-faint text-sm font-semibold hover:text-ink"
+              >
+                Iestatījumi
+              </button>
+            )}
+          </div>
         </div>
       </header>
 
