@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { setCredentials, validateCredentials } from '../api'
+import { setCredentials, validateCredentials, openExternal } from '../api'
 import WpAdminGuide from './WpAdminGuide'
 
 // Shown on first run (no credentials saved yet) and from "Iestatījumi"
@@ -65,7 +65,14 @@ export default function Setup({ initial, onSaved, revalidationError }) {
           {showGuide ? 'Paslēpt soli pa solim' : 'Kā to atrast? Rādīt soli pa solim →'}
         </button>
         {showGuide && (
-          <div className="mt-3">
+          <div className="mt-3 space-y-2">
+            <button
+              type="button"
+              onClick={() => openExternal('https://lach.lv/wp-admin/profile.php')}
+              className="text-accent text-sm font-semibold hover:underline"
+            >
+              Atvērt profila lapu tieši →
+            </button>
             <WpAdminGuide />
           </div>
         )}
