@@ -2,7 +2,7 @@
   "name": "lach-protokolu-riks",
   "productName": "LACH Protokolu Rīks",
   "private": true,
-  "version": "0.2.0",
+  "version": "0.2.1",
   "type": "module",
   "main": "electron/main.mjs",
   "scripts": {
@@ -32,7 +32,8 @@
     "publish": {
       "provider": "github",
       "owner": "kikis118",
-      "repo": "lach-protocol-tool"
+      "repo": "lach-protocol-tool",
+      "releaseType": "release"
     },
     "files": [
       "dist/**/*",
