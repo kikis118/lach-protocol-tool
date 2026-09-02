@@ -149,6 +149,31 @@ function timeToSeconds(t) {
   return m * 60 + s
 }
 
+// Best-effort scan for a "best players"/MVP section - UNVERIFIED against
+// any real protocol sample. No LHL protocol seen so far (across the
+// historical import or any live game this project has processed) has
+// shown one - every layout detail documented at the top of this file was
+// confirmed against real files, this one wasn't. If some protocol
+// variant (a different tournament's template, say) DOES print one, this
+// gives it a chance to auto-fill; if the label never matches, the UI
+// still always offers manual entry regardless, so nothing is blocked by
+// this being wrong or incomplete.
+const BEST_PLAYER_LABEL = /labākais spēlēt[āa]j|labākie spēlēt[āa]ji|vērtīg[āa]kie spēlēt[āa]ji|spēles vīr[iu]|3\s*zvaigznes|three stars|\bmvp\b/i
+
+function findBestPlayers(lines) {
+  const labelLineIdx = lines.findIndex((l) => l.items.some((it) => BEST_PLAYER_LABEL.test(it.str)))
+  if (labelLineIdx === -1) return []
+  const labelLine = lines[labelLineIdx]
+  const afterLabel = labelLine.items
+    .filter((it) => !BEST_PLAYER_LABEL.test(it.str))
+    .map((it) => it.str.trim())
+    .filter(Boolean)
+  const candidates = afterLabel.length > 0
+    ? afterLabel
+    : (lines[labelLineIdx + 1]?.items || []).map((it) => it.str.trim()).filter(Boolean)
+  return candidates.slice(0, 3)
+}
+
 // Extracts the info bar above the roster tables ("Datums, laiks:",
 // "Vieta:") and the period-score footer ("Periodu rezultāti") - neither
 // touched by parseProtocolItems(), which starts at the roster header row.
@@ -205,7 +230,9 @@ export function parseProtocolMeta(items) {
       })
   }
 
-  return { date, time, venue, periodScores }
+  const bestPlayersParsed = findBestPlayers(lines)
+
+  return { date, time, venue, periodScores, bestPlayersParsed }
 }
 
 // items: [{ str, x, y }] from pdfjs getTextContent(), page 1 only

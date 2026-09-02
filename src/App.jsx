@@ -1,14 +1,24 @@
 import { useEffect, useState } from 'react'
-import { pickPdf, parseProtocol, saveGame, getCredentials, openExternal, getLookups, checkForUpdates, getUpdateStatus, installUpdate, onUpdateStatus } from './api'
+import { pickPdf, parseProtocol, saveGame, getCredentials, setCredentials, validateCredentials, openExternal, getLookups, checkForUpdates, getUpdateStatus, installUpdate, onUpdateStatus } from './api'
 import GamePicker from './components/GamePicker'
 import PreviewGame from './components/PreviewGame'
 import CreateNewGame from './components/CreateNewGame'
 import Setup from './components/Setup'
 import UpdateBadge from './components/UpdateBadge'
 
+// How long a saved login is trusted without being re-checked against
+// WordPress - like a "stay signed in" session rather than a real login
+// every launch, but not forever either: if the Application Password
+// gets revoked/changed, the next check after this window catches it and
+// sends the admin back to Setup instead of failing silently deep in a
+// save. ~3 months, per the explicit ask ("months... until major
+// changes, then relog").
+const REVALIDATE_AFTER_MS = 90 * 24 * 60 * 60 * 1000
+
 export default function App() {
   const [credentials, setCredentialsState] = useState(null) // null = still loading
   const [showSettings, setShowSettings] = useState(false)
+  const [revalidationError, setRevalidationError] = useState(null)
 
   const [filePath, setFilePath] = useState(null)
   const [loading, setLoading] = useState(false)
@@ -31,7 +41,24 @@ export default function App() {
   const [updateStatus, setUpdateStatus] = useState({ state: 'idle' })
 
   useEffect(() => {
-    getCredentials().then(setCredentialsState)
+    getCredentials().then(async (creds) => {
+      setCredentialsState(creds)
+      if (!creds?.username || !creds?.appPassword) return
+      const age = creds.validatedAt ? Date.now() - new Date(creds.validatedAt).getTime() : Infinity
+      if (age < REVALIDATE_AFTER_MS) return
+      const check = await validateCredentials(creds)
+      if (check.valid) {
+        const refreshed = { ...creds, validatedAt: new Date().toISOString() }
+        await setCredentials(refreshed)
+        setCredentialsState(refreshed)
+      } else {
+        // Credentials themselves are kept (so Setup can prefill them for
+        // editing) but no longer treated as "logged in" - hasCredentials
+        // below only looks at username/appPassword, so this alone
+        // wouldn't force Setup back open without the check further down.
+        setRevalidationError(check.error)
+      }
+    })
     const unsubscribe = onUpdateStatus(setUpdateStatus)
     getUpdateStatus().then(setUpdateStatus)
     runUpdateCheck()
@@ -73,10 +100,18 @@ export default function App() {
     }
   }
 
-  async function handleSave() {
+  async function handleSave({ baltichockeyUrl, bestPlayers } = {}) {
     setSaveState('saving')
     try {
-      await saveGame(result.game_id, result.payload)
+      // Always sent as a full overwrite (blank clears it) rather than a
+      // sparse patch - same convention already used for the stats table
+      // writes this payload also carries.
+      const payload = {
+        ...result.payload,
+        _lach_baltichockey_url: baltichockeyUrl || '',
+        _lach_best_players: JSON.stringify((bestPlayers || []).map((s) => s.trim()).filter(Boolean)),
+      }
+      await saveGame(result.game_id, payload)
       setSaveState('saved')
     } catch (err) {
       setSaveState('failed')
@@ -105,7 +140,7 @@ export default function App() {
     }
   }
 
-  const hasCredentials = credentials?.username && credentials?.appPassword
+  const hasCredentials = credentials?.username && credentials?.appPassword && !revalidationError
 
   return (
     <div className="min-h-screen bg-base text-ink-100 font-sans">
@@ -155,9 +190,11 @@ export default function App() {
         {credentials === null ? null : !hasCredentials || showSettings ? (
           <Setup
             initial={credentials}
+            revalidationError={revalidationError}
             onSaved={(creds) => {
               setCredentialsState(creds)
               setShowSettings(false)
+              setRevalidationError(null)
             }}
           />
         ) : (

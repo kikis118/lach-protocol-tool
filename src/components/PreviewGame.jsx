@@ -2,12 +2,21 @@ import { useState } from 'react'
 import { PeriodScoresTable, BoxScoreTable, GoalsList, PenaltiesList } from './GameSummary'
 
 export default function PreviewGame({ result, saveState, saveResult, onSave, onCancel, onOpenExternal }) {
-  const { homeTeam, awayTeam, preview, notes, alreadyHasData, alreadyHasDataCheckFailed, goalCountMatchesProtocol, game_id } = result
+  const { homeTeam, awayTeam, preview, notes, alreadyHasData, alreadyHasDataCheckFailed, goalCountMatchesProtocol, game_id, meta } = result
 
-  // Frontend-only for now - not read by handleSave, not sent anywhere.
-  // Wiring this into an actual save (new WP field + payload) is a
-  // separate follow-up once the field itself is confirmed working.
-  const [baltichockeyUrl, setBaltichockeyUrl] = useState('')
+  const [baltichockeyUrl, setBaltichockeyUrl] = useState(result.existingBaltichockeyUrl || '')
+
+  // Pre-filled from whatever's already saved on this game (a previous
+  // upload), falling back to whatever this protocol's own best-effort
+  // scan found (see parseProtocol.mjs's findBestPlayers - unverified
+  // against a confirmed real layout) - always editable either way, and
+  // left blank is a valid, saveable answer if the protocol has none.
+  const initialBestPlayers = (result.existingBestPlayers?.length ? result.existingBestPlayers : meta?.bestPlayersParsed) || []
+  const [bestPlayers, setBestPlayers] = useState([0, 1, 2].map((i) => initialBestPlayers[i] || ''))
+
+  function setBestPlayer(i, value) {
+    setBestPlayers((prev) => prev.map((v, idx) => (idx === i ? value : v)))
+  }
 
   return (
     <div className="space-y-4">
@@ -21,6 +30,13 @@ export default function PreviewGame({ result, saveState, saveResult, onSave, onC
             {awayTeam.name}
           </h2>
           <p className="text-ink-faint text-xs mt-1">Spēles ID: {game_id}</p>
+          {meta?.date && (
+            <p className="text-ink-faint text-xs mt-1">
+              No protokola: {meta.date}
+              {meta.time ? ` ${meta.time}` : ''}
+              {meta.venue ? ` · ${meta.venue}` : ''}
+            </p>
+          )}
         </div>
       </div>
 
@@ -28,7 +44,7 @@ export default function PreviewGame({ result, saveState, saveResult, onSave, onC
 
       <div className="bg-card border border-line rounded-lg p-4">
         <label className="block text-xs uppercase tracking-wide text-ink-faint font-semibold mb-1">
-          Baltichockey saite (vēl netiek saglabāts)
+          Baltichockey saite
         </label>
         <input
           type="text"
@@ -37,6 +53,29 @@ export default function PreviewGame({ result, saveState, saveResult, onSave, onC
           placeholder="https://baltichockey.tv/..."
           className="w-full bg-surface border border-line-strong rounded-md px-3 py-2 text-ink text-sm focus:outline-none focus:border-accent"
         />
+      </div>
+
+      <div className="bg-card border border-line rounded-lg p-4">
+        <label className="block text-xs uppercase tracking-wide text-ink-faint font-semibold mb-1">
+          Labākie spēlētāji
+        </label>
+        <p className="text-ink-faint text-xs mb-2">
+          {meta?.bestPlayersParsed?.length
+            ? 'Atrasts protokolā - pārbaudi un labo, ja nepieciešams.'
+            : 'Protokolā nav atrasts - ievadi pašrocīgi, ja vēlies (nav obligāti).'}
+        </p>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+          {bestPlayers.map((value, i) => (
+            <input
+              key={i}
+              type="text"
+              value={value}
+              onChange={(e) => setBestPlayer(i, e.target.value)}
+              placeholder={`Vārds, Uzvārds`}
+              className="w-full bg-surface border border-line-strong rounded-md px-3 py-2 text-ink text-sm focus:outline-none focus:border-accent"
+            />
+          ))}
+        </div>
       </div>
 
       {alreadyHasData && (
@@ -73,7 +112,7 @@ export default function PreviewGame({ result, saveState, saveResult, onSave, onC
       <div className="flex flex-wrap items-center gap-3 pt-2">
         <button
           type="button"
-          onClick={onSave}
+          onClick={() => onSave({ baltichockeyUrl, bestPlayers })}
           disabled={saveState === 'saving'}
           className="bg-accent text-ink font-bold uppercase text-sm tracking-wide px-6 py-3 rounded-lg hover:bg-red-600 transition-colors disabled:opacity-50"
         >

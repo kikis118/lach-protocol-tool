@@ -24,6 +24,10 @@ export function setCredentials(creds) {
   return window.lachTool.setCredentials(creds)
 }
 
+export function validateCredentials(creds) {
+  return window.lachTool.validateCredentials(creds)
+}
+
 export function openExternal(url) {
   return window.lachTool.openExternal(url)
 }

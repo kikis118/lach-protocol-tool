@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { setCredentials } from '../api'
+import { setCredentials, validateCredentials } from '../api'
 import WpAdminGuide from './WpAdminGuide'
 
 // Shown on first run (no credentials saved yet) and from "Iestatījumi"
@@ -7,17 +7,33 @@ import WpAdminGuide from './WpAdminGuide'
 // WordPress Application Password here, stored in a local JSON file on
 // their own machine only (see electron/main.mjs credentialsPath()),
 // never bundled with the app and never sent anywhere but lach.lv itself.
-export default function Setup({ initial, onSaved }) {
+//
+// Acts like a real login now (was previously just "save whatever's
+// typed, find out later if it was wrong"): checks the credentials
+// against WordPress's own /wp/v2/users/me before accepting them, and
+// stamps a `validatedAt` time that App.jsx uses to silently re-check
+// every so often - so this screen only reappears again either the
+// first time, or once those credentials actually stop working (a
+// revoked/changed Application Password), not on every single launch.
+export default function Setup({ initial, onSaved, revalidationError }) {
   const [username, setUsername] = useState(initial?.username || '')
   const [appPassword, setAppPassword] = useState(initial?.appPassword || '')
   const [saving, setSaving] = useState(false)
   const [showGuide, setShowGuide] = useState(false)
+  const [error, setError] = useState(null)
 
   async function handleSave() {
     setSaving(true)
+    setError(null)
     try {
-      await setCredentials({ username, appPassword })
-      onSaved({ username, appPassword })
+      const result = await validateCredentials({ username, appPassword })
+      if (!result.valid) {
+        setError(result.error || 'Nepareizi pieslēgšanās dati')
+        return
+      }
+      const creds = { username, appPassword, validatedAt: new Date().toISOString() }
+      await setCredentials(creds)
+      onSaved(creds)
     } finally {
       setSaving(false)
     }
@@ -33,6 +49,11 @@ export default function Setup({ initial, onSaved }) {
           Nepieciešams WordPress lietotājvārds un Application Password (izveido to lach.lv wp-admin &rarr; Lietotāji &rarr;
           Profils &rarr; Application Passwords).
         </p>
+        {revalidationError && (
+          <p className="text-amber-400 text-sm font-semibold mt-2">
+            Iepriekšējie pieslēgšanās dati vairs nav derīgi ({revalidationError}) - lūdzu pieslēdzies no jauna.
+          </p>
+        )}
         <button
           type="button"
           onClick={() => setShowGuide((v) => !v)}
@@ -67,13 +88,14 @@ export default function Setup({ initial, onSaved }) {
           />
         </div>
       </div>
+      {error && <p className="text-red-400 text-sm font-semibold">{error}</p>}
       <button
         type="button"
         onClick={handleSave}
         disabled={!username || !appPassword || saving}
         className="bg-accent text-ink font-bold uppercase text-sm tracking-wide px-6 py-3 rounded-lg hover:bg-red-600 transition-colors disabled:opacity-50"
       >
-        {saving ? 'Saglabā...' : 'Saglabāt'}
+        {saving ? 'Pārbauda...' : 'Pieslēgties'}
       </button>
     </div>
   )

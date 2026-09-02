@@ -184,6 +184,27 @@ ipcMain.handle('credentials:set', (_event, creds) => {
   return true
 })
 
+// Setup used to save whatever was typed without checking it against
+// WordPress at all - garbage credentials still got you into the main
+// app, only failing much later on an actual save (real security
+// boundary was never at risk: WordPress itself always rejected a bad
+// Basic Auth header on the write endpoint, confirmed via a live 401 -
+// but the UX let you wander in without knowing). This validates the
+// CANDIDATE creds (not whatever's already saved) against WordPress's
+// own built-in "who am I" endpoint before Setup accepts them.
+ipcMain.handle('credentials:validate', async (_event, { username, appPassword }) => {
+  try {
+    const res = await fetch(`${WP_API.replace('/lach/v1', '')}/wp/v2/users/me`, {
+      headers: { Authorization: `Basic ${Buffer.from(`${username}:${appPassword}`).toString('base64')}` },
+    })
+    if (res.ok) return { valid: true }
+    if (res.status === 401 || res.status === 403) return { valid: false, error: 'Nepareizs lietotājvārds vai Application Password' }
+    return { valid: false, error: `WordPress atbildēja ar HTTP ${res.status}` }
+  } catch (err) {
+    return { valid: false, error: err.message }
+  }
+})
+
 ipcMain.handle('dialog:pickPdf', async () => {
   const { canceled, filePaths } = await dialog.showOpenDialog({
     filters: [{ name: 'PDF', extensions: ['pdf'] }],
@@ -248,6 +269,8 @@ ipcMain.handle('protocol:parse', async (_event, { filePath, gameId, seasonId }) 
 
   let alreadyHasData = false
   let alreadyHasDataCheckFailed = false
+  let existingBaltichockeyUrl = ''
+  let existingBestPlayers = []
   try {
     const statusRes = await fetch(`${WP_API}/game-autofill/${game.game_id}`, { headers: { Authorization: wpAuthHeader() } })
     if (!statusRes.ok) throw new Error(`game-autofill status check: HTTP ${statusRes.status}`)
@@ -255,12 +278,31 @@ ipcMain.handle('protocol:parse', async (_event, { filePath, gameId, seasonId }) 
     alreadyHasData = (statusBody.stats_table_rows || []).some((row) =>
       ['c_id__2', 'c_id__6', 'c_id__12', 'c_id__15', 'c_id__16'].some((k) => row[k] && row[k] !== '0' && row[k] !== ''),
     )
+    // Pre-fill from whatever's already saved on this game (a previous
+    // upload, or a manual wp-admin edit) rather than always starting
+    // these two fields blank - same "never assumed, always checked"
+    // pattern as alreadyHasData just above.
+    existingBaltichockeyUrl = statusBody.meta?._lach_baltichockey_url || ''
+    try {
+      existingBestPlayers = JSON.parse(statusBody.meta?._lach_best_players || '[]')
+    } catch {
+      existingBestPlayers = []
+    }
   } catch (err) {
     console.error('alreadyHasData check failed:', err.message)
     alreadyHasDataCheckFailed = true
   }
 
-  return { status: 'matched', ...report, alreadyHasData, alreadyHasDataCheckFailed, qa: parsed.qa, meta }
+  return {
+    status: 'matched',
+    ...report,
+    alreadyHasData,
+    alreadyHasDataCheckFailed,
+    qa: parsed.qa,
+    meta,
+    existingBaltichockeyUrl,
+    existingBestPlayers,
+  }
 })
 
 ipcMain.handle('game:save', async (_event, { gameId, payload }) => {

@@ -6,6 +6,7 @@ import { contextBridge, ipcRenderer } from 'electron'
 contextBridge.exposeInMainWorld('lachTool', {
   getCredentials: () => ipcRenderer.invoke('credentials:get'),
   setCredentials: (creds) => ipcRenderer.invoke('credentials:set', creds),
+  validateCredentials: (creds) => ipcRenderer.invoke('credentials:validate', creds),
   pickPdf: () => ipcRenderer.invoke('dialog:pickPdf'),
   parseProtocol: (filePath, gameId, seasonId) => ipcRenderer.invoke('protocol:parse', { filePath, gameId, seasonId }),
   saveGame: (gameId, payload) => ipcRenderer.invoke('game:save', { gameId, payload }),
