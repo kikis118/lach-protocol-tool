@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { setCredentials } from '../api'
+import WpAdminGuide from './WpAdminGuide'
 
 // Shown on first run (no credentials saved yet) and from "Iestatījumi"
 // any time after - each person who installs this app enters their OWN
@@ -10,6 +11,7 @@ export default function Setup({ initial, onSaved }) {
   const [username, setUsername] = useState(initial?.username || '')
   const [appPassword, setAppPassword] = useState(initial?.appPassword || '')
   const [saving, setSaving] = useState(false)
+  const [showGuide, setShowGuide] = useState(false)
 
   async function handleSave() {
     setSaving(true)
@@ -22,13 +24,27 @@ export default function Setup({ initial, onSaved }) {
   }
 
   return (
-    <div className="bg-card border border-line rounded-lg p-6 space-y-4 max-w-md mx-auto mt-12">
+    <div
+      className={`bg-card border border-line rounded-lg p-6 space-y-4 mx-auto mt-12 transition-all ${showGuide ? 'max-w-2xl' : 'max-w-md'}`}
+    >
       <div>
         <h2 className="text-lg font-black uppercase text-ink tracking-wide">WordPress pieslēgšanās dati</h2>
         <p className="text-ink-faint text-sm mt-1">
           Nepieciešams WordPress lietotājvārds un Application Password (izveido to lach.lv wp-admin &rarr; Lietotāji &rarr;
           Profils &rarr; Application Passwords).
         </p>
+        <button
+          type="button"
+          onClick={() => setShowGuide((v) => !v)}
+          className="text-accent text-sm font-semibold hover:underline mt-2"
+        >
+          {showGuide ? 'Paslēpt soli pa solim' : 'Kā to atrast? Rādīt soli pa solim →'}
+        </button>
+        {showGuide && (
+          <div className="mt-3">
+            <WpAdminGuide />
+          </div>
+        )}
       </div>
       <div className="space-y-3">
         <div>
