@@ -42,7 +42,7 @@ export default function WpAdminGuide() {
             <button type="button" className="bg-[#2271b1] text-white rounded px-3 py-1.5 font-semibold" disabled>
               Add Application Password
             </button>
-            <Callout step={4} className="-right-6 top-full mt-1" text="" />
+            <Callout step={4} className="left-full ml-2 top-1/2 -translate-y-1/2" text="" />
           </div>
 
           <div className="relative bg-[#edfaef] border border-green-700/40 rounded px-3 py-2">
@@ -60,15 +60,15 @@ export default function WpAdminGuide() {
             <p className="text-[10px] text-gray-600 mt-1">
               Be sure to save this in a safe location. You will not be able to retrieve it.
             </p>
-            <Callout step={5} className="-right-2 -top-3" text="ielīmē šo Protokolu Rīkā" />
+            <Callout step={5} className="-right-2 -top-3" text="nokopē šo paroli - ieliec to Protokolu Rīkā" />
           </div>
         </div>
       </div>
 
       <p className="text-ink-faint text-[11px] px-3 pb-3 pt-1 border-t border-line-strong">
-        5. Nokopē šo jauno paroli (poga <b>Copy</b>) un ielīmē to Protokolu Rīka "Application Password" laukā. Ja
-        to kādreiz pazaudē vai vēlies to nomainīt - vari jebkurā brīdī izveidot jaunu Application Password ar
-        jebkādu nosaukumu, tam nemaz nav obligāti jāsauc "protokoli".
+        5. Nokopē šo paroli - ieliec to Protokolu Rīkā. Ja to kādreiz pazaudē vai vēlies to nomainīt - vari
+        jebkurā brīdī izveidot jaunu Application Password ar jebkādu nosaukumu, tam nemaz nav obligāti jāsauc
+        "protokoli".
       </p>
     </div>
   )

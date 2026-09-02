@@ -114,14 +114,14 @@ export default function PreviewGame({ result, saveState, saveResult, onSave, onC
           type="button"
           onClick={() => onSave({ baltichockeyUrl, bestPlayers })}
           disabled={saveState === 'saving'}
-          className="bg-accent text-ink font-bold uppercase text-sm tracking-wide px-6 py-3 rounded-lg hover:bg-red-600 transition-colors disabled:opacity-50"
+          className="bg-accent text-ink font-bold uppercase text-sm tracking-wide px-6 py-3 rounded-lg hover:bg-red-600 hover:scale-[1.02] active:scale-[0.98] transition-all disabled:opacity-50 disabled:hover:scale-100"
         >
           {saveState === 'saving' ? 'Saglabā...' : 'Saglabāt spēli'}
         </button>
         <button
           type="button"
           onClick={() => onOpenExternal(`https://lach.lv/wp-admin/post.php?post=${game_id}&action=edit`)}
-          className="bg-card border border-line-strong text-ink-secondary hover:border-accent hover:text-ink font-bold uppercase text-xs tracking-wide px-6 py-3 rounded-lg transition-colors"
+          className="bg-card border border-line-strong text-ink-secondary hover:border-accent hover:text-ink font-bold uppercase text-xs tracking-wide px-6 py-3 rounded-lg transition-all hover:scale-[1.02] active:scale-[0.98]"
         >
           Rediģēt WP-Admin
         </button>
@@ -129,7 +129,7 @@ export default function PreviewGame({ result, saveState, saveResult, onSave, onC
           type="button"
           onClick={onCancel}
           disabled={saveState === 'saving'}
-          className="bg-card border border-line-strong text-ink-secondary hover:border-accent hover:text-ink font-bold uppercase text-xs tracking-wide px-6 py-3 rounded-lg transition-colors disabled:opacity-50"
+          className="bg-card border border-line-strong text-ink-secondary hover:border-accent hover:text-ink font-bold uppercase text-xs tracking-wide px-6 py-3 rounded-lg transition-all hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50 disabled:hover:scale-100"
         >
           {saveState === 'saved' || saveState === 'failed' ? 'Augšupielādēt citu' : 'Atcelt'}
         </button>

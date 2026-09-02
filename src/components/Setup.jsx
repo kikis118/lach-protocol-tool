@@ -60,19 +60,21 @@ export default function Setup({ initial, onSaved, revalidationError }) {
         <button
           type="button"
           onClick={() => setShowGuide((v) => !v)}
-          className="text-accent text-sm font-semibold hover:underline mt-2"
+          className="bg-card border border-line-strong text-ink-secondary hover:border-accent hover:text-ink font-semibold text-sm px-4 py-2 rounded-lg transition-all hover:scale-[1.02] active:scale-[0.98] mt-3"
         >
           {showGuide ? 'Paslēpt soli pa solim' : 'Kā to atrast? Rādīt soli pa solim →'}
         </button>
         {showGuide && (
-          <div className="mt-3 space-y-2">
-            <button
-              type="button"
-              onClick={() => openExternal('https://lach.lv/wp-admin/profile.php')}
-              className="text-accent text-sm font-semibold hover:underline"
-            >
-              Atvērt profila lapu tieši →
-            </button>
+          <div className="mt-3 space-y-3">
+            <div className="text-center">
+              <button
+                type="button"
+                onClick={() => openExternal('https://lach.lv/wp-admin/profile.php')}
+                className="inline-flex items-center gap-2 bg-accent text-ink font-bold uppercase text-xs tracking-wide px-5 py-2.5 rounded-lg hover:bg-red-600 hover:scale-[1.02] active:scale-[0.98] transition-all"
+              >
+                Atvērt profila lapu tieši →
+              </button>
+            </div>
             <WpAdminGuide />
           </div>
         )}
@@ -84,7 +86,7 @@ export default function Setup({ initial, onSaved, revalidationError }) {
             type="text"
             value={username}
             onChange={(e) => setUsername(e.target.value)}
-            className="w-full bg-surface border border-line-strong rounded-md px-3 py-2 text-ink text-sm focus:outline-none focus:border-accent"
+            className="w-full bg-surface border border-line-strong rounded-md px-3 py-2 text-ink text-sm transition-all focus:outline-none focus:border-accent focus:ring-2 focus:ring-accent/20 hover:border-ink-faint"
           />
         </div>
         <div>
@@ -94,7 +96,7 @@ export default function Setup({ initial, onSaved, revalidationError }) {
             value={appPassword}
             onChange={(e) => setAppPassword(e.target.value)}
             placeholder="xxxx xxxx xxxx xxxx xxxx xxxx"
-            className="w-full bg-surface border border-line-strong rounded-md px-3 py-2 text-ink text-sm focus:outline-none focus:border-accent"
+            className="w-full bg-surface border border-line-strong rounded-md px-3 py-2 text-ink text-sm transition-all focus:outline-none focus:border-accent focus:ring-2 focus:ring-accent/20 hover:border-ink-faint"
           />
         </div>
       </div>
@@ -103,7 +105,7 @@ export default function Setup({ initial, onSaved, revalidationError }) {
         type="button"
         onClick={handleSave}
         disabled={!username || !appPassword || saving}
-        className="bg-accent text-ink font-bold uppercase text-sm tracking-wide px-6 py-3 rounded-lg hover:bg-red-600 transition-colors disabled:opacity-50"
+        className="bg-accent text-ink font-bold uppercase text-sm tracking-wide px-6 py-3 rounded-lg hover:bg-red-600 hover:scale-[1.02] active:scale-[0.98] transition-all disabled:opacity-50 disabled:hover:scale-100"
       >
         {saving ? 'Pārbauda...' : 'Pieslēgties'}
       </button>

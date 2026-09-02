@@ -142,11 +142,32 @@ export default function App() {
 
   const hasCredentials = credentials?.username && credentials?.appPassword && !revalidationError
 
+  // Logo click = "go home" to the default upload screen. Only wired up
+  // once actually logged in - clicking it while Setup is showing (no
+  // credentials yet) would have nowhere meaningful to go. Only confirms
+  // if there's actually something to lose (matches handleCancel's own
+  // guard) - a bare click from the already-default screen should just
+  // work, not nag with a confirm dialog for nothing.
+  function handleLogoClick() {
+    if (!hasCredentials) return
+    setShowSettings(false)
+    if (filePath || result || creatingNew) {
+      handleCancel()
+    } else {
+      handleReset()
+    }
+  }
+
   return (
     <div className="min-h-screen bg-base text-ink-100 font-sans">
       <header className="bg-surface border-b-2 border-accent shadow-lg">
         <div className="max-w-4xl mx-auto px-6 py-4 flex items-center justify-between">
-          <h1 className="text-xl font-black uppercase text-ink tracking-wider">
+          <h1
+            onClick={handleLogoClick}
+            className={`text-xl font-black uppercase text-ink tracking-wider ${
+              hasCredentials ? 'cursor-pointer hover:opacity-80 transition-opacity' : ''
+            }`}
+          >
             LACH <span className="text-accent">Protokolu Rīks</span>
           </h1>
           <div className="flex items-center gap-4">
@@ -155,9 +176,9 @@ export default function App() {
               <button
                 type="button"
                 onClick={() => setShowSettings(true)}
-                className="text-ink-faint text-sm font-semibold hover:text-ink"
+                className="text-ink-faint text-sm font-semibold hover:text-ink transition-colors"
               >
-                Iestatījumi
+                Autorizēties
               </button>
             )}
           </div>
@@ -236,7 +257,7 @@ export default function App() {
                   type="button"
                   onClick={handlePick}
                   disabled={loading}
-                  className="bg-accent text-ink font-bold uppercase text-sm tracking-wide px-6 py-3 rounded-lg hover:bg-red-600 transition-colors disabled:opacity-50"
+                  className="bg-accent text-ink font-bold uppercase text-sm tracking-wide px-6 py-3 rounded-lg hover:bg-red-600 hover:scale-[1.02] active:scale-[0.98] transition-all disabled:opacity-50 disabled:hover:scale-100"
                 >
                   {loading ? 'Apstrādā...' : 'Izvēlēties failu'}
                 </button>
