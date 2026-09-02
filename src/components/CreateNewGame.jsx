@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react'
-import { getLookups, createNewGamePreview, createNewGameSave, openExternal } from '../api'
+import { useState } from 'react'
+import { createNewGamePreview, createNewGameSave, openExternal } from '../api'
 import { BoxScoreTable, GoalsList, PenaltiesList } from './GameSummary'
 
 // Best-effort only - just saves a click when the protocol's printed
@@ -23,34 +23,25 @@ function fromDatetimeLocal(value) {
   return value.replace('T', ' ') + ':00'
 }
 
-export default function CreateNewGame({ filePath, parsedTeams, meta, onReset }) {
-  const [lookups, setLookups] = useState(null)
+const EMPTY_LOOKUPS = { seasonCombos: [], teams: [], venues: [] }
+
+export default function CreateNewGame({ filePath, parsedTeams, meta, lookups = EMPTY_LOOKUPS, initialSeasonIndex, onCancel }) {
   const [error, setError] = useState(null)
 
   const [mappedA, setMappedA] = useState('')
   const [mappedB, setMappedB] = useState('')
   const [homeIsA, setHomeIsA] = useState(true)
-  const [seasonIndex, setSeasonIndex] = useState('')
-  const [venueId, setVenueId] = useState('')
-  const [kickoff, setKickoff] = useState('')
+  // Carries over the season already picked before upload (App.jsx's
+  // "Visas sezonas" selector) so it doesn't need choosing twice -
+  // still just a default, the dropdown below stays fully editable.
+  const [seasonIndex, setSeasonIndex] = useState(initialSeasonIndex || '')
+  const [venueId, setVenueId] = useState(() => guessVenueId(lookups.venues, meta?.venue))
+  const [kickoff, setKickoff] = useState(() => toDatetimeLocal(meta?.date, meta?.time))
 
   const [loadingPreview, setLoadingPreview] = useState(false)
   const [preview, setPreview] = useState(null)
   const [saveState, setSaveState] = useState('idle')
   const [saveResult, setSaveResult] = useState(null)
-
-  useEffect(() => {
-    getLookups().then((l) => {
-      setLookups(l)
-      setVenueId(guessVenueId(l.venues, meta?.venue))
-      setKickoff(toDatetimeLocal(meta?.date, meta?.time))
-    })
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
-
-  if (!lookups) {
-    return <p className="text-ink-faint text-center py-12">Ielādē...</p>
-  }
 
   const canPreview = mappedA && mappedB && mappedA !== mappedB && seasonIndex !== '' && venueId && kickoff
   const homeTeamId = homeIsA ? mappedA : mappedB
@@ -101,9 +92,6 @@ export default function CreateNewGame({ filePath, parsedTeams, meta, onReset }) 
             {meta?.venue && <> &middot; {meta.venue}</>}
           </p>
         </div>
-        <button type="button" onClick={onReset} className="text-accent text-sm font-semibold hover:underline shrink-0">
-          Augšupielādēt citu
-        </button>
       </div>
 
       {!preview && (
@@ -179,14 +167,23 @@ export default function CreateNewGame({ filePath, parsedTeams, meta, onReset }) 
             />
           </Field>
 
-          <button
-            type="button"
-            onClick={handlePreview}
-            disabled={!canPreview || loadingPreview}
-            className="bg-accent text-ink font-bold uppercase text-sm tracking-wide px-6 py-3 rounded-lg hover:bg-red-600 transition-colors disabled:opacity-50"
-          >
-            {loadingPreview ? 'Apstrādā...' : 'Priekšskatīt'}
-          </button>
+          <div className="flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              onClick={handlePreview}
+              disabled={!canPreview || loadingPreview}
+              className="bg-accent text-ink font-bold uppercase text-sm tracking-wide px-6 py-3 rounded-lg hover:bg-red-600 transition-colors disabled:opacity-50"
+            >
+              {loadingPreview ? 'Apstrādā...' : 'Priekšskatīt'}
+            </button>
+            <button
+              type="button"
+              onClick={onCancel}
+              className="bg-card border border-line-strong text-ink-secondary hover:border-accent hover:text-ink font-bold uppercase text-xs tracking-wide px-6 py-3 rounded-lg transition-colors"
+            >
+              Atcelt
+            </button>
+          </div>
           {error && <p className="text-red-400 text-sm">{error}</p>}
         </div>
       )}
@@ -235,9 +232,18 @@ export default function CreateNewGame({ filePath, parsedTeams, meta, onReset }) 
             <button
               type="button"
               onClick={() => setPreview(null)}
-              className="bg-card border border-line-strong text-ink-secondary hover:border-accent hover:text-ink font-bold uppercase text-xs tracking-wide px-6 py-3 rounded-lg transition-colors"
+              disabled={saveState === 'saving'}
+              className="bg-card border border-line-strong text-ink-secondary hover:border-accent hover:text-ink font-bold uppercase text-xs tracking-wide px-6 py-3 rounded-lg transition-colors disabled:opacity-50"
             >
               Labot izvēli
+            </button>
+            <button
+              type="button"
+              onClick={onCancel}
+              disabled={saveState === 'saving'}
+              className="bg-card border border-line-strong text-ink-secondary hover:border-accent hover:text-ink font-bold uppercase text-xs tracking-wide px-6 py-3 rounded-lg transition-colors disabled:opacity-50"
+            >
+              {saveState === 'saved' ? 'Augšupielādēt citu' : 'Atcelt'}
             </button>
             {saveState === 'saved' && (
               <span className="text-emerald-400 text-sm font-semibold">

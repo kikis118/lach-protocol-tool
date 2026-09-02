@@ -7,7 +7,7 @@ function formatKickoff(kickoff) {
 // Shown when the protocol couldn't be matched to exactly one WP game
 // automatically (date+team-name matching found 0 or 2+ candidates) - the
 // admin picks the right one by eye instead of the tool guessing wrong.
-export default function GamePicker({ result, onPick }) {
+export default function GamePicker({ result, onPick, onCancel }) {
   const candidates = result.candidates?.length > 0 ? result.candidates : result.fallbackCandidates || []
   const isFallback = result.candidates?.length === 0
 
@@ -47,6 +47,14 @@ export default function GamePicker({ result, onPick }) {
           <p className="px-4 py-6 text-center text-ink-faint text-sm">Nekas nav atrasts.</p>
         )}
       </div>
+
+      <button
+        type="button"
+        onClick={onCancel}
+        className="bg-card border border-line-strong text-ink-secondary hover:border-accent hover:text-ink font-bold uppercase text-xs tracking-wide px-6 py-3 rounded-lg transition-colors"
+      >
+        Atcelt
+      </button>
     </div>
   )
 }

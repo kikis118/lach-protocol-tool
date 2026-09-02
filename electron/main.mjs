@@ -159,14 +159,18 @@ ipcMain.handle('dialog:pickPdf', async () => {
 
 ipcMain.handle('shell:openExternal', (_event, url) => shell.openExternal(url))
 
-ipcMain.handle('protocol:parse', async (_event, { filePath, gameId }) => {
+ipcMain.handle('protocol:parse', async (_event, { filePath, gameId, seasonId }) => {
   const buffer = fs.readFileSync(filePath)
   const items = await itemsFromBuffer(buffer)
   const meta = parseProtocolMeta(items)
   const parsed = parseProtocolItems(items)
 
   const data = await fetchFullData()
-  const games = data.games || []
+  // Scoping to the admin's own pre-selected season/league (see
+  // lookups:get) narrows matching to just that season's games - both
+  // more accurate (no cross-season team-name collisions) and the whole
+  // point of asking up front "where is this protocol going".
+  const games = (data.games || []).filter((g) => !seasonId || String(g.season_id) === String(seasonId))
   const teams = data.teams || {}
   const teamDetails = data.team_details || {}
   const players = data.players || {}
@@ -180,6 +184,7 @@ ipcMain.handle('protocol:parse', async (_event, { filePath, gameId }) => {
       { date: meta.date, teamAName: parsed.teamA.name, teamBName: parsed.teamB.name },
       games,
       teams,
+      !seasonId,
     )
     if (matches.length === 1) {
       game = matches[0]

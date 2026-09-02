@@ -14,7 +14,18 @@ import { resolveTeamId } from './resolveRoster.mjs'
 // several candidates across seasons, which is fine: the caller always
 // checks candidates.length === 1 before treating it as a confident
 // auto-match, and shows a picker otherwise.
-export function findMatchingGames({ date, teamAName, teamBName }, games, teams) {
+// allowTeamsOnlyFallback: false when the caller has already narrowed
+// `games` to one specific season (see main.mjs's protocol:parse) - found
+// empirically (2026-09-03) that the wide teams-only fallback can then
+// confidently latch onto the WRONG game: two teams that played each
+// other on the actual protocol's date (a different season) also happen
+// to have a scheduled rematch within the selected season, and with no
+// date to disambiguate, that unrelated fixture looks like a clean single
+// match. Safer to report "none" (with that season's own games offered
+// as manual-pick candidates) than to silently guess across an entire
+// season on team names alone - the whole point of picking a season up
+// front is tighter confidence, not looser.
+export function findMatchingGames({ date, teamAName, teamBName }, games, teams, allowTeamsOnlyFallback = true) {
   const byTeams = (pool) =>
     pool.filter((g) => {
       const a = resolveTeamId(teamAName, g, teams)
@@ -27,6 +38,8 @@ export function findMatchingGames({ date, teamAName, teamBName }, games, teams) 
     const matches = byTeams(sameDate)
     if (matches.length > 0) return { matches, scope: 'date+teams' }
   }
+
+  if (!allowTeamsOnlyFallback) return { matches: [], scope: 'date+teams' }
 
   return { matches: byTeams(games), scope: 'teams-only' }
 }

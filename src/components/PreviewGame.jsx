@@ -1,6 +1,6 @@
 import { PeriodScoresTable, BoxScoreTable, GoalsList, PenaltiesList } from './GameSummary'
 
-export default function PreviewGame({ result, saveState, saveResult, onSave, onReset, onOpenExternal }) {
+export default function PreviewGame({ result, saveState, saveResult, onSave, onCancel, onOpenExternal }) {
   const { homeTeam, awayTeam, preview, notes, alreadyHasData, alreadyHasDataCheckFailed, goalCountMatchesProtocol, game_id } = result
 
   return (
@@ -16,13 +16,6 @@ export default function PreviewGame({ result, saveState, saveResult, onSave, onR
           </h2>
           <p className="text-ink-faint text-xs mt-1">Spēles ID: {game_id}</p>
         </div>
-        <button
-          type="button"
-          onClick={onReset}
-          className="text-accent text-sm font-semibold hover:underline shrink-0"
-        >
-          Augšupielādēt citu
-        </button>
       </div>
 
       {preview.periodScores && <PeriodScoresTable periodScores={preview.periodScores} homeTeam={homeTeam.name} awayTeam={awayTeam.name} />}
@@ -73,6 +66,14 @@ export default function PreviewGame({ result, saveState, saveResult, onSave, onR
           className="bg-card border border-line-strong text-ink-secondary hover:border-accent hover:text-ink font-bold uppercase text-xs tracking-wide px-6 py-3 rounded-lg transition-colors"
         >
           Rediģēt WP-Admin
+        </button>
+        <button
+          type="button"
+          onClick={onCancel}
+          disabled={saveState === 'saving'}
+          className="bg-card border border-line-strong text-ink-secondary hover:border-accent hover:text-ink font-bold uppercase text-xs tracking-wide px-6 py-3 rounded-lg transition-colors disabled:opacity-50"
+        >
+          {saveState === 'saved' || saveState === 'failed' ? 'Augšupielādēt citu' : 'Atcelt'}
         </button>
         {saveState === 'saved' && <span className="text-emerald-400 text-sm font-semibold">Saglabāts!</span>}
         {saveState === 'failed' && <span className="text-red-400 text-sm font-semibold">Neizdevās: {saveResult}</span>}

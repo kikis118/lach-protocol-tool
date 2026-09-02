@@ -8,8 +8,8 @@ export function pickPdf() {
   return window.lachTool.pickPdf()
 }
 
-export function parseProtocol(filePath, gameId) {
-  return window.lachTool.parseProtocol(filePath, gameId)
+export function parseProtocol(filePath, gameId, seasonId) {
+  return window.lachTool.parseProtocol(filePath, gameId, seasonId)
 }
 
 export function saveGame(gameId, payload) {

@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react'
-import { pickPdf, parseProtocol, saveGame, getCredentials, openExternal } from './api'
+import { pickPdf, parseProtocol, saveGame, getCredentials, openExternal, getLookups, checkForUpdates } from './api'
 import GamePicker from './components/GamePicker'
 import PreviewGame from './components/PreviewGame'
 import CreateNewGame from './components/CreateNewGame'
 import Setup from './components/Setup'
-import UpdateChecker from './components/UpdateChecker'
+import UpdateBadge from './components/UpdateBadge'
 
 export default function App() {
   const [credentials, setCredentialsState] = useState(null) // null = still loading
@@ -18,9 +18,39 @@ export default function App() {
   const [saveResult, setSaveResult] = useState(null)
   const [creatingNew, setCreatingNew] = useState(false)
 
+  const [lookups, setLookups] = useState(null)
+  const [seasonIndex, setSeasonIndex] = useState('') // '' = visas sezonas (no scoping)
+
+  // Update state lives here (not just inside a header widget) so a
+  // prominent banner can show the moment the app opens, per the
+  // explicit ask - not something buried behind a click.
+  const [updateChecking, setUpdateChecking] = useState(false)
+  const [updateInfo, setUpdateInfo] = useState(null)
+  const [updateError, setUpdateError] = useState(null)
+
   useEffect(() => {
     getCredentials().then(setCredentialsState)
+    runUpdateCheck()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  useEffect(() => {
+    if (credentials?.username && credentials?.appPassword) {
+      getLookups().then(setLookups)
+    }
+  }, [credentials])
+
+  async function runUpdateCheck() {
+    setUpdateChecking(true)
+    setUpdateError(null)
+    try {
+      setUpdateInfo(await checkForUpdates())
+    } catch (err) {
+      setUpdateError(err.message)
+    } finally {
+      setUpdateChecking(false)
+    }
+  }
 
   async function handlePick() {
     const path = await pickPdf()
@@ -35,7 +65,8 @@ export default function App() {
     setLoading(true)
     setError(null)
     try {
-      const body = await parseProtocol(path ?? filePath, gameId)
+      const seasonId = lookups?.seasonCombos[seasonIndex]?.seasonId
+      const body = await parseProtocol(path ?? filePath, gameId, gameId ? undefined : seasonId)
       setResult(body)
       setSaveState('idle')
     } catch (err) {
@@ -64,6 +95,19 @@ export default function App() {
     setCreatingNew(false)
   }
 
+  // Only ever offered while nothing has actually been sent to WordPress
+  // yet (every call site below hides/disables this once saveState is
+  // 'saving') - once a save request is in flight, cancelling the CLIENT
+  // side wouldn't reliably stop it: PHP keeps running a request to
+  // completion by default even if the caller gives up waiting, so a
+  // "cancel" at that point could look like it worked while the write
+  // still happens. Safer to just not offer it there than to fake it.
+  function handleCancel() {
+    if (window.confirm('Vai tiešām vēlies atcelt? Neviena informācija netiks saglabāta.')) {
+      handleReset()
+    }
+  }
+
   const hasCredentials = credentials?.username && credentials?.appPassword
 
   return (
@@ -74,7 +118,7 @@ export default function App() {
             LACH <span className="text-accent">Protokolu Rīks</span>
           </h1>
           <div className="flex items-center gap-4">
-            <UpdateChecker />
+            <UpdateBadge checking={updateChecking} info={updateInfo} error={updateError} onRecheck={runUpdateCheck} />
             {hasCredentials && (
               <button
                 type="button"
@@ -87,6 +131,19 @@ export default function App() {
           </div>
         </div>
       </header>
+
+      {updateInfo?.hasUpdate && (
+        <div className="bg-accent text-ink px-4 py-3 flex flex-wrap items-center justify-center gap-3 font-bold text-sm">
+          <span>🔔 Pieejama jauna versija: {updateInfo.latestVersion} (tev: {updateInfo.currentVersion})</span>
+          <button
+            type="button"
+            onClick={() => openExternal(updateInfo.releaseUrl)}
+            className="bg-ink text-accent px-4 py-1.5 rounded-md uppercase text-xs tracking-wide hover:bg-gray-200 transition-colors"
+          >
+            Lejupielādēt →
+          </button>
+        </div>
+      )}
 
       <main className="max-w-4xl mx-auto p-6 space-y-6">
         {credentials === null ? null : !hasCredentials || showSettings ? (
@@ -105,6 +162,30 @@ export default function App() {
                   <h2 className="text-lg font-black uppercase text-ink tracking-wide">Augšupielādēt protokolu</h2>
                   <p className="text-ink-faint text-sm mt-1">Izvēlies spēles protokola PDF failu no datora.</p>
                 </div>
+
+                {lookups && (
+                  <div>
+                    <label className="block text-xs uppercase tracking-wide text-ink-faint font-semibold mb-1">
+                      Sezona / turnīrs
+                    </label>
+                    <select
+                      value={seasonIndex}
+                      onChange={(e) => setSeasonIndex(e.target.value)}
+                      className="w-full bg-surface border border-line-strong rounded-md px-3 py-2 text-ink text-sm focus:outline-none focus:border-accent"
+                    >
+                      <option value="">Visas sezonas</option>
+                      {lookups.seasonCombos.map((s, i) => (
+                        <option key={s.seasonId} value={i}>
+                          {s.seasonName} ({s.tournamentName})
+                        </option>
+                      ))}
+                    </select>
+                    <p className="text-ink-faint text-xs mt-1">
+                      Ja izvēlēta sezona, protokols tiks meklēts tikai tajā - precīzāk un ātrāk.
+                    </p>
+                  </div>
+                )}
+
                 <button
                   type="button"
                   onClick={handlePick}
@@ -119,7 +200,7 @@ export default function App() {
 
             {result && (result.status === 'ambiguous' || result.status === 'none') && !creatingNew && (
               <>
-                <GamePicker result={result} onPick={(gameId) => handleParse(filePath, gameId)} />
+                <GamePicker result={result} onPick={(gameId) => handleParse(filePath, gameId)} onCancel={handleCancel} />
                 {result.status === 'none' && (
                   <div className="text-center">
                     <button
@@ -135,7 +216,14 @@ export default function App() {
             )}
 
             {result && result.status === 'none' && creatingNew && (
-              <CreateNewGame filePath={filePath} parsedTeams={result.parsedTeams} meta={result.parsedMeta} onReset={handleReset} />
+              <CreateNewGame
+                filePath={filePath}
+                parsedTeams={result.parsedTeams}
+                meta={result.parsedMeta}
+                lookups={lookups}
+                initialSeasonIndex={seasonIndex}
+                onCancel={handleCancel}
+              />
             )}
 
             {result && result.status === 'matched' && (
@@ -144,7 +232,7 @@ export default function App() {
                 saveState={saveState}
                 saveResult={saveResult}
                 onSave={handleSave}
-                onReset={handleReset}
+                onCancel={handleCancel}
                 onOpenExternal={openExternal}
               />
             )}

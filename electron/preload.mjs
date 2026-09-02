@@ -7,7 +7,7 @@ contextBridge.exposeInMainWorld('lachTool', {
   getCredentials: () => ipcRenderer.invoke('credentials:get'),
   setCredentials: (creds) => ipcRenderer.invoke('credentials:set', creds),
   pickPdf: () => ipcRenderer.invoke('dialog:pickPdf'),
-  parseProtocol: (filePath, gameId) => ipcRenderer.invoke('protocol:parse', { filePath, gameId }),
+  parseProtocol: (filePath, gameId, seasonId) => ipcRenderer.invoke('protocol:parse', { filePath, gameId, seasonId }),
   saveGame: (gameId, payload) => ipcRenderer.invoke('game:save', { gameId, payload }),
   openExternal: (url) => ipcRenderer.invoke('shell:openExternal', url),
   getLookups: () => ipcRenderer.invoke('lookups:get'),
