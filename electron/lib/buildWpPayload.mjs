@@ -2,6 +2,12 @@
 // a game's stats from its already-parsed protocol, instead of someone
 // retyping every player's line by hand into WP admin.
 //
+// FORKED, NOT SHARED: manually-maintained copy of lach-hockey-app's
+// scripts/lib/buildWpPayload.mjs (separate repo) - currently byte-
+// identical (confirmed via diff), but nothing enforces that going
+// forward. A fix to a field shape below needs to be manually ported
+// there too - see resolveRoster.mjs's own note in this same folder.
+//
 // Field shapes below were NOT guessed - reverse-engineered from a real,
 // already-filled-in "Edit Game" admin page (a genuine completed game),
 // by reading the literal stored `value="..."` of each hidden input:

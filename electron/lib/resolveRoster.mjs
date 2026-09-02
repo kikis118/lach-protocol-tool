@@ -1,7 +1,14 @@
-// Shared between scripts/parse-protocols.mjs (frontend enrichment) and
-// scripts/wp-autofill.mjs (WP field auto-fill) - both need to map a
-// protocol's printed team name/jersey numbers onto real WP team/player
-// IDs, using the exact same rules.
+// Used by electron/main.mjs's protocol:parse/game:save handlers to map
+// a protocol's printed team name/jersey numbers onto real WP team/
+// player IDs.
+//
+// FORKED, NOT SHARED: this file is a manually-maintained copy of
+// lach-hockey-app's scripts/lib/resolveRoster.mjs (separate repo,
+// github.com/kikis118/lach-hockey-app - kept separate on purpose, see
+// that repo's PROJECT-NOTES.md) - currently byte-identical (confirmed
+// via diff), but nothing enforces that going forward. A fix here
+// (name-matching rules, jersey-resolution priority, etc.) needs to be
+// manually ported there too.
 
 // Matches a protocol's printed team name ("HK JŪRAS SPĒKI") to the WP
 // team_id for this game's home/away teams. Case differs (PDF is

@@ -1,6 +1,18 @@
 // Parses one LHL (Latvijas Hokeja Līga) official game protocol PDF into
-// structured goal/penalty/goalie data. See scripts/parse-protocols.mjs
-// for how this is used and README notes there for the "why".
+// structured goal/penalty/goalie data. Used by electron/main.mjs's
+// protocol:parse/game:createNewPreview handlers.
+//
+// FORKED, NOT SHARED: manually-maintained copy of lach-hockey-app's
+// scripts/lib/parseProtocol.mjs (separate repo, github.com/kikis118/
+// lach-hockey-app - kept separate on purpose, see that repo's
+// PROJECT-NOTES.md). No package/submodule/build step keeps them in
+// sync - a fix to the layout parsing below (column detection, goal/
+// penalty rules, header labels, etc.) needs to be manually ported
+// there too. The two copies deliberately differ in one place already -
+// only THIS copy has findBestPlayers() below (a feature this app's own
+// UI needs that the other repo's game-events.json pipeline has no use
+// for) - don't try to force full identity, just check anything ELSE
+// that changes here.
 //
 // Layout notes (confirmed against real files, not guessed):
 // - Two tables ("A Komanda"/"B Komanda"), each: a roster list, with two
