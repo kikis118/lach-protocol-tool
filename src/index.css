@@ -1,0 +1,32 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Copied verbatim from lach-hockey-app's src/index.css so this tool's
+   preview renders pixel-identical to the real site - not redefined
+   independently, see that file if these ever drift. */
+:root {
+  --color-base: #0b0e14;
+  --color-surface: #131722;
+  --color-card: #1e2330;
+  --color-inset: #000000;
+  --color-surface-hover: #1f2937;
+  --color-accent: #e50914;
+
+  --color-ink: #ffffff;
+  --color-ink-100: #f3f4f6;
+  --color-ink-secondary: #d1d5db;
+  --color-ink-muted: #9ca3af;
+  --color-ink-faint: #6b7280;
+  --color-ink-faintest: #4b5563;
+  --color-ink-dim: #374151;
+
+  --color-line: #1f2937;
+  --color-line-strong: #374151;
+  --color-line-hover: #6b7280;
+}
+
+body {
+  background-color: var(--color-base);
+  color: var(--color-ink);
+}
