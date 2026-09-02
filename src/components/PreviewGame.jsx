@@ -1,7 +1,13 @@
+import { useState } from 'react'
 import { PeriodScoresTable, BoxScoreTable, GoalsList, PenaltiesList } from './GameSummary'
 
 export default function PreviewGame({ result, saveState, saveResult, onSave, onCancel, onOpenExternal }) {
   const { homeTeam, awayTeam, preview, notes, alreadyHasData, alreadyHasDataCheckFailed, goalCountMatchesProtocol, game_id } = result
+
+  // Frontend-only for now - not read by handleSave, not sent anywhere.
+  // Wiring this into an actual save (new WP field + payload) is a
+  // separate follow-up once the field itself is confirmed working.
+  const [baltichockeyUrl, setBaltichockeyUrl] = useState('')
 
   return (
     <div className="space-y-4">
@@ -19,6 +25,19 @@ export default function PreviewGame({ result, saveState, saveResult, onSave, onC
       </div>
 
       {preview.periodScores && <PeriodScoresTable periodScores={preview.periodScores} homeTeam={homeTeam.name} awayTeam={awayTeam.name} />}
+
+      <div className="bg-card border border-line rounded-lg p-4">
+        <label className="block text-xs uppercase tracking-wide text-ink-faint font-semibold mb-1">
+          Baltichockey saite (vēl netiek saglabāts)
+        </label>
+        <input
+          type="text"
+          value={baltichockeyUrl}
+          onChange={(e) => setBaltichockeyUrl(e.target.value)}
+          placeholder="https://baltichockey.tv/..."
+          className="w-full bg-surface border border-line-strong rounded-md px-3 py-2 text-ink text-sm focus:outline-none focus:border-accent"
+        />
+      </div>
 
       {alreadyHasData && (
         <div className="bg-amber-950/40 border border-amber-600/40 text-amber-300 text-sm rounded-lg px-4 py-3">
