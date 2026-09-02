@@ -4,7 +4,10 @@ import WpAdminGuide from './WpAdminGuide'
 
 // Shown on first run (no credentials saved yet) and from "Iestatījumi"
 // any time after - each person who installs this app enters their OWN
-// WordPress Application Password here, stored in a local JSON file on
+// Application Password here (under the shared LHL_admin1 account this
+// tool is distributed under - the username defaults to that so every
+// installer only has to generate their own Application Password, not
+// also know/type the account name), stored in a local JSON file on
 // their own machine only (see electron/main.mjs credentialsPath()),
 // never bundled with the app and never sent anywhere but lach.lv itself.
 //
@@ -16,7 +19,7 @@ import WpAdminGuide from './WpAdminGuide'
 // first time, or once those credentials actually stop working (a
 // revoked/changed Application Password), not on every single launch.
 export default function Setup({ initial, onSaved, revalidationError }) {
-  const [username, setUsername] = useState(initial?.username || '')
+  const [username, setUsername] = useState(initial?.username || 'LHL_admin1')
   const [appPassword, setAppPassword] = useState(initial?.appPassword || '')
   const [saving, setSaving] = useState(false)
   const [showGuide, setShowGuide] = useState(false)
