@@ -2,7 +2,10 @@
 // Passwords" screen, NOT a real screenshot - the real one would carry
 // Kristians's actual account data (existing password names, IP
 // fragments, etc.), not something to ship inside the app. Mimics the
-// same 4 numbered callouts he drew on his own screenshot.
+// same numbered callouts he drew on his own screenshot, plus a 5th step
+// (the green "your new password is..." box WordPress shows right after
+// clicking "Add") showing where that value goes in this app's own Setup
+// screen.
 export default function WpAdminGuide() {
   return (
     <div className="bg-surface border border-line-strong rounded-lg overflow-hidden text-xs">
@@ -41,8 +44,32 @@ export default function WpAdminGuide() {
             </button>
             <Callout step={4} className="-right-6 top-full mt-1" text="" />
           </div>
+
+          <div className="relative bg-[#edfaef] border border-green-700/40 rounded px-3 py-2">
+            <p className="text-[10px] text-gray-700">
+              Your new password for <b>protokoli</b> is:
+            </p>
+            <div className="flex items-center gap-2 mt-1">
+              <div className="bg-white border border-gray-400 rounded px-2 py-1 font-mono tracking-wide flex-1">
+                xxxx xxxx xxxx xxxx xxxx xxxx
+              </div>
+              <button type="button" className="border border-gray-400 rounded px-2 py-1 text-[#2271b1] font-semibold" disabled>
+                Copy
+              </button>
+            </div>
+            <p className="text-[10px] text-gray-600 mt-1">
+              Be sure to save this in a safe location. You will not be able to retrieve it.
+            </p>
+            <Callout step={5} className="-right-2 -top-3" text="ielīmē šo Protokolu Rīkā" />
+          </div>
         </div>
       </div>
+
+      <p className="text-ink-faint text-[11px] px-3 pb-3 pt-1 border-t border-line-strong">
+        5. Nokopē šo jauno paroli (poga <b>Copy</b>) un ielīmē to Protokolu Rīka "Application Password" laukā. Ja
+        to kādreiz pazaudē vai vēlies to nomainīt - vari jebkurā brīdī izveidot jaunu Application Password ar
+        jebkādu nosaukumu, tam nemaz nav obligāti jāsauc "protokoli".
+      </p>
     </div>
   )
 }
