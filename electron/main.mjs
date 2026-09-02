@@ -67,6 +67,12 @@ function createWindow() {
     width: 1100,
     height: 800,
     autoHideMenuBar: true,
+    // electron-builder embeds build/icon.ico into the packaged .exe
+    // automatically (Windows-only, by convention - no config needed for
+    // that part) - this is what makes the DEV-mode window/taskbar icon
+    // match instead of showing Electron's own default icon, since that
+    // embedding only applies to a packaged build.
+    icon: path.join(__dirname, '../build/icon.png'),
     webPreferences: {
       preload: path.join(__dirname, 'preload.mjs'),
       contextIsolation: true,
