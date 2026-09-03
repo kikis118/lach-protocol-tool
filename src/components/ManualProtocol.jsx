@@ -1,5 +1,5 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react'
-import { createManualGamePreview, createMissingPlayers, createNewGameSave, finishScheduledGame, openExternal } from '../api'
+import { createManualGamePreview, createMissingPlayers, createNewGameSave, finishScheduledGame, getLookups, openExternal } from '../api'
 import { PeriodScoresTable, BoxScoreTable, GoalsList, PenaltiesList } from './GameSummary'
 import { upsertHistoryEntry } from '../protocolHistory'
 
@@ -411,6 +411,32 @@ const ManualProtocol = forwardRef(function ManualProtocol(
     }
   }
 
+  // Explicit reload, on top of the automatic prefill-on-team-pick above -
+  // `lookups` is fetched once when the app opens and never refreshed, so
+  // a team whose roster grew mid-session (e.g. createMissingPlayersForSide
+  // ran for an earlier game today) wouldn't show those new players via
+  // the automatic prefill alone. Always replaces the roster wholesale
+  // with a FRESH fetch - not a merge - matching "copy in the whole
+  // roster, then I'll add/remove individuals myself" from the ask this
+  // was built for.
+  const [loadingRosterFor, setLoadingRosterFor] = useState(null) // 'home' | 'away' | null
+  async function handleLoadRoster(side) {
+    const teamId = side === 'home' ? homeTeamId : awayTeamId
+    if (!teamId) return
+    setLoadingRosterFor(side)
+    try {
+      const fresh = await getLookups()
+      const roster = fresh.teamDetails?.[teamId]?.roster || []
+      const rows = roster.map((p) => ({ id: uid(), jersey: p.number != null ? String(p.number) : '', name: p.name, poz: GROUP_TO_POZ[p.group] || '' }))
+      if (side === 'home') setHomeRoster(rows)
+      else setAwayRoster(rows)
+    } catch (err) {
+      setError(`Neizdevās ielādēt sastāvu: ${err.message}`)
+    } finally {
+      setLoadingRosterFor(null)
+    }
+  }
+
   const canPreview = mode !== 'pick' && homeTeamId && awayTeamId && homeTeamId !== awayTeamId && seasonIndex !== '' && venueId && kickoff
 
   function buildParsed() {
@@ -729,6 +755,8 @@ const ManualProtocol = forwardRef(function ManualProtocol(
               setGoals={setHomeGoals}
               penalties={homePenalties}
               setPenalties={setHomePenalties}
+              onLoadRoster={homeTeamId ? () => handleLoadRoster('home') : null}
+              loadingRoster={loadingRosterFor === 'home'}
             />
             <TeamProtocolPanel
               label="B komanda (viesi)"
@@ -739,6 +767,8 @@ const ManualProtocol = forwardRef(function ManualProtocol(
               setGoals={setAwayGoals}
               penalties={awayPenalties}
               setPenalties={setAwayPenalties}
+              onLoadRoster={awayTeamId ? () => handleLoadRoster('away') : null}
+              loadingRoster={loadingRosterFor === 'away'}
             />
           </div>
 
@@ -856,13 +886,29 @@ export default ManualProtocol
 // (goals) + Sodi (penalties) sub-tables, matching the paper's own
 // "A komanda" / "B komanda" sections (each printed with its own roster,
 // goals and penalties - never split across a shared table).
-function TeamProtocolPanel({ label, teamName, roster, setRoster, goals, setGoals, penalties, setPenalties }) {
+function TeamProtocolPanel({
+  label, teamName, roster, setRoster, goals, setGoals, penalties, setPenalties,
+  onLoadRoster, loadingRoster,
+}) {
   return (
     <div className="bg-card border border-line rounded-lg p-4 space-y-4">
-      <h3 className="text-accent font-bold text-sm uppercase tracking-wide">
-        {label}
-        {teamName && <span className="text-ink font-black normal-case ml-2">{teamName}</span>}
-      </h3>
+      <div className="flex items-center justify-between gap-2">
+        <h3 className="text-accent font-bold text-sm uppercase tracking-wide">
+          {label}
+          {teamName && <span className="text-ink font-black normal-case ml-2">{teamName}</span>}
+        </h3>
+        {onLoadRoster && (
+          <button
+            type="button"
+            onClick={onLoadRoster}
+            disabled={loadingRoster}
+            title="Ielādē visu komandas sastāvu no WP (aizvieto zemāko sarakstu)"
+            className="text-accent text-xs font-semibold hover:underline disabled:opacity-50 whitespace-nowrap"
+          >
+            {loadingRoster ? 'Ielādē...' : '↻ Ielādēt sastāvu no WP'}
+          </button>
+        )}
+      </div>
 
       <RosterEditor roster={roster} setRoster={setRoster} />
       <GoalsEditor rows={goals} setRows={setGoals} />

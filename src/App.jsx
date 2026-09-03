@@ -150,9 +150,21 @@ export default function App() {
     setManualEntry(true)
   }
 
+  // Also how an ALREADY-PUBLISHED entry gets re-opened for editing (no
+  // wp-admin detour, per explicit ask) - forced to mode 'existing' +
+  // existingGameId regardless of how it was originally created (a plain
+  // "new game" post still has a real game_id after its first publish),
+  // since from this point on it's always "update this specific game",
+  // never "create another one". finish-scheduled-game.php (lach-hockey-
+  // app repo) accepts this even when the game is already finished -
+  // it replaces the result rather than refusing.
   function handleResumeHistoryEntry(entry) {
     setActiveHistoryId(entry.id)
-    setActiveHistoryData(entry.data)
+    setActiveHistoryData(
+      entry.status === 'saved' && entry.gameId
+        ? { ...entry.data, mode: 'existing', existingGameId: String(entry.gameId) }
+        : entry.data,
+    )
     setManualEntry(true)
   }
 
@@ -278,7 +290,9 @@ export default function App() {
                 <div className="bg-card border border-line rounded-lg p-6 space-y-4 flex flex-col">
                   <div>
                     <h2 className="text-lg font-black uppercase text-ink tracking-wide">Augšupielādēt protokolu</h2>
-                    <p className="text-ink-faint text-sm mt-1">Izvēlies spēles protokola PDF failu no datora.</p>
+                    <p className="text-ink-faint text-sm mt-1">
+                      Tikai PDF formātā - oficiālais elektroniskais protokols, ko sistēma automātiski nolasa un sasaista ar spēli.
+                    </p>
                   </div>
 
                   {lookups && (
@@ -324,7 +338,7 @@ export default function App() {
                   <div>
                     <h2 className="text-lg font-black uppercase text-ink tracking-wide">Ievadīt protokolu ar roku</h2>
                     <p className="text-ink-faint text-sm mt-1">
-                      Rokrakstā aizpildīts protokols (foto/WhatsApp) - nav PDF, ko nolasīt automātiski.
+                      Nav PDF faila? Ievadi tos pašus laukus pats, tāpat kā uz papīra.
                     </p>
                   </div>
                   <div className="mt-auto">
@@ -351,11 +365,8 @@ export default function App() {
                     >
                       <button
                         type="button"
-                        onClick={() =>
-                          entry.status === 'saved'
-                            ? openExternal(`https://lach.lv/wp-admin/post.php?post=${entry.gameId}&action=edit`)
-                            : handleResumeHistoryEntry(entry)
-                        }
+                        onClick={() => handleResumeHistoryEntry(entry)}
+                        title={entry.status === 'saved' ? 'Atvērt un labot rīkā' : 'Turpināt melnrakstu'}
                         className="flex-1 text-left"
                       >
                         <span className="text-ink font-semibold text-sm">
@@ -374,6 +385,17 @@ export default function App() {
                       >
                         {entry.status === 'saved' ? 'Publicēts' : 'Melnraksts'}
                       </span>
+                      {entry.status === 'saved' && entry.gameId && (
+                        <button
+                          type="button"
+                          onClick={() => openExternal(`https://lach.lv/wp-admin/post.php?post=${entry.gameId}&action=edit`)}
+                          aria-label="Atvērt WP-Admin"
+                          title="Atvērt WP-Admin"
+                          className="w-7 h-7 shrink-0 rounded-md text-ink-faint hover:text-accent hover:bg-accent/10 transition-colors flex items-center justify-center text-xs"
+                        >
+                          ↗
+                        </button>
+                      )}
                       <button
                         type="button"
                         onClick={() => handleDeleteHistoryEntry(entry.id)}
