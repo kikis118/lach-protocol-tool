@@ -44,6 +44,25 @@ export default function App() {
   const [lookups, setLookups] = useState(null)
   const [seasonIndex, setSeasonIndex] = useState('') // '' = visas sezonas (no scoping)
 
+  // In-app confirm modal, replacing window.confirm() everywhere in this
+  // file - a real bug, not just cosmetic: Electron/Chromium has a known
+  // quirk where native dialogs (window.confirm/alert) can leave the
+  // renderer's focus in a bad state for a few seconds after closing,
+  // specifically affecting native form controls like <select> - matches
+  // exactly what was reported ("back from cancelling a protocol, the
+  // Sezona/turnīrs dropdown is unclickable for a few seconds"). A custom
+  // React modal never triggers a native dialog at all, so this class of
+  // bug can't happen. `askConfirm` returns a Promise instead of
+  // blocking synchronously, resolved by whichever button gets clicked.
+  const [confirmState, setConfirmState] = useState(null) // { message, resolve } | null
+  function askConfirm(message) {
+    return new Promise((resolve) => setConfirmState({ message, resolve }))
+  }
+  function answerConfirm(answer) {
+    confirmState?.resolve(answer)
+    setConfirmState(null)
+  }
+
   // Update state lives here (not just inside a header widget) so a
   // prominent banner can show the moment the app opens, per the
   // explicit ask - not something buried behind a click. Driven by
@@ -168,8 +187,8 @@ export default function App() {
     setManualEntry(true)
   }
 
-  function handleDeleteHistoryEntry(id) {
-    if (!window.confirm('Vai tiešām dzēst šo protokolu no saraksta?')) return
+  async function handleDeleteHistoryEntry(id) {
+    if (!(await askConfirm('Vai tiešām dzēst šo protokolu no saraksta?'))) return
     removeHistoryEntry(id)
     setHistoryList(listHistory())
   }
@@ -188,35 +207,41 @@ export default function App() {
   // ref's isDirty), and word it as a save prompt rather than a data-loss
   // warning. Answering yes force-flushes that draft before leaving, so
   // it's never a race against the ~800ms debounce.
-  function handleCancel() {
+  async function handleCancel() {
     if (manualEntry && manualProtocolRef.current) {
       if (!manualProtocolRef.current.isDirty()) {
         handleReset()
         return
       }
-      if (window.confirm('Protokols nav saglabāts. Saglabāt?')) {
+      if (await askConfirm('Protokols nav saglabāts. Saglabāt?')) {
         manualProtocolRef.current.flushDraft()
         handleReset()
       }
       return
     }
-    if (window.confirm('Vai tiešām vēlies atcelt? Neviena informācija netiks saglabāta.')) {
+    if (await askConfirm('Vai tiešām vēlies atcelt? Neviena informācija netiks saglabāta.')) {
       handleReset()
     }
   }
 
   const hasCredentials = credentials?.username && credentials?.appPassword && !revalidationError
+  // Whether there's actually somewhere to go "back" FROM - same
+  // condition the explicit back button (below) uses to decide whether
+  // to show itself at all.
+  const hasSomethingOpen = Boolean(filePath || result || creatingNew || manualEntry)
 
-  // Logo click = "go home" to the default upload screen. Only wired up
-  // once actually logged in - clicking it while Setup is showing (no
-  // credentials yet) would have nowhere meaningful to go. Only confirms
-  // if there's actually something to lose (matches handleCancel's own
-  // guard) - a bare click from the already-default screen should just
-  // work, not nag with a confirm dialog for nothing.
+  // Logo click = same "go back" action as the explicit button - kept
+  // working for muscle memory, but per explicit feedback ("not obvious
+  // to click the logo every time") it's no longer the ONLY way back.
+  // Only wired up once actually logged in - clicking it while Setup is
+  // showing (no credentials yet) would have nowhere meaningful to go.
+  // Only confirms if there's actually something to lose (matches
+  // handleCancel's own guard) - a bare click from the already-default
+  // screen should just work, not nag with a confirm dialog for nothing.
   function handleLogoClick() {
     if (!hasCredentials) return
     setShowSettings(false)
-    if (filePath || result || creatingNew || manualEntry) {
+    if (hasSomethingOpen) {
       handleCancel()
     } else {
       handleReset()
@@ -227,14 +252,25 @@ export default function App() {
     <div className="min-h-screen bg-base text-ink-100 font-sans">
       <header className="bg-surface border-b-2 border-accent shadow-lg">
         <div className="max-w-4xl mx-auto px-6 py-4 flex items-center justify-between">
-          <h1
-            onClick={handleLogoClick}
-            className={`text-xl font-black uppercase text-ink tracking-wider ${
-              hasCredentials ? 'cursor-pointer hover:opacity-80 transition-opacity' : ''
-            }`}
-          >
-            LACH <span className="text-accent">Protokolu Rīks</span>
-          </h1>
+          <div className="flex items-center gap-4">
+            {hasCredentials && hasSomethingOpen && (
+              <button
+                type="button"
+                onClick={handleCancel}
+                className="flex items-center gap-1.5 text-ink-secondary hover:text-ink font-bold uppercase text-sm tracking-wide transition-colors"
+              >
+                &larr; Atpakaļ
+              </button>
+            )}
+            <h1
+              onClick={handleLogoClick}
+              className={`text-xl font-black uppercase text-ink tracking-wider ${
+                hasCredentials ? 'cursor-pointer hover:opacity-80 transition-opacity' : ''
+              }`}
+            >
+              LACH <span className="text-accent">Protokolu Rīks</span>
+            </h1>
+          </div>
           <div className="flex items-center gap-4">
             <UpdateBadge status={updateStatus} onRecheck={runUpdateCheck} />
             {hasCredentials && (
@@ -464,6 +500,36 @@ export default function App() {
           </>
         )}
       </main>
+
+      {confirmState && (
+        <ConfirmModal message={confirmState.message} onYes={() => answerConfirm(true)} onNo={() => answerConfirm(false)} />
+      )}
+    </div>
+  )
+}
+
+function ConfirmModal({ message, onYes, onNo }) {
+  return (
+    <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4">
+      <div className="bg-card border border-line-strong rounded-lg shadow-xl p-6 max-w-sm w-full space-y-4">
+        <p className="text-ink text-sm">{message}</p>
+        <div className="flex justify-end gap-3">
+          <button
+            type="button"
+            onClick={onNo}
+            className="bg-card border border-line-strong text-ink-secondary hover:border-accent hover:text-ink font-bold uppercase text-xs tracking-wide px-4 py-2 rounded-lg transition-colors"
+          >
+            Nē
+          </button>
+          <button
+            type="button"
+            onClick={onYes}
+            className="bg-accent text-ink font-bold uppercase text-xs tracking-wide px-4 py-2 rounded-lg hover:bg-red-600 transition-colors"
+          >
+            Jā
+          </button>
+        </div>
+      </div>
     </div>
   )
 }
