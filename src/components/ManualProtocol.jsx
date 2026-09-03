@@ -1,23 +1,7 @@
-import { useEffect, useRef, useState } from 'react'
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react'
 import { createManualGamePreview, createMissingPlayers, createNewGameSave, finishScheduledGame, openExternal } from '../api'
 import { PeriodScoresTable, BoxScoreTable, GoalsList, PenaltiesList } from './GameSummary'
-
-// Saved to localStorage (survives an app update/relaunch, unlike plain
-// React state) so filling in a manual protocol isn't lost - restored
-// automatically the next time this screen opens. Both a silent autosave
-// AND an explicit "Saglabāt melnrakstu" button write to the exact same
-// slot (see persistDraft() below) - one slot only, so starting a fresh
-// manual entry after loading a draft just overwrites it on the next save.
-const DRAFT_KEY = 'lachManualProtocolDraft'
-
-function loadDraft() {
-  try {
-    const raw = localStorage.getItem(DRAFT_KEY)
-    return raw ? JSON.parse(raw) : null
-  } catch {
-    return null
-  }
-}
+import { upsertHistoryEntry } from '../protocolHistory'
 
 const GROUP_TO_POZ = { Goalies: 'Vārtsargs', Defense: 'Aizsargs', Forwards: 'Uzbrucējs' }
 const POZ_TO_GROUP = { Vārtsargs: 'Goalies', Aizsargs: 'Defense', Uzbrucējs: 'Forwards' }
@@ -218,19 +202,38 @@ function kickoffToInputValue(kickoff) {
 
 const EMPTY_LOOKUPS = { seasonCombos: [], teams: [], venues: [], teamDetails: {}, games: [] }
 
-export default function ManualProtocol({ lookups = EMPTY_LOOKUPS, initialSeasonIndex, credentials = null, onCancel }) {
+const ManualProtocol = forwardRef(function ManualProtocol(
+  { lookups = EMPTY_LOOKUPS, initialSeasonIndex, credentials = null, historyId, initialData = null, onCancel },
+  ref,
+) {
   const [error, setError] = useState(null)
-  // Loaded once, at mount - a later save just overwrites the same slot.
-  const [draft] = useState(() => loadDraft())
+  // Set once by App.jsx when this screen opens (a fresh id for a new
+  // entry, or an existing history entry's own id + its saved data to
+  // resume) - this component itself only ever reads `initialData` once,
+  // at mount, same as the old single-slot draft it replaces; every
+  // subsequent save (autosave or explicit) upserts back into the SAME
+  // history entry via `historyId`, never a different one.
+  const draft = initialData
   const [draftSavedAt, setDraftSavedAt] = useState(null)
+  // Whether there's a change not yet reflected in the persisted draft -
+  // read via the imperative handle below, by App.jsx's "leave this
+  // screen?" confirm, so it only actually asks when something would be
+  // lost, and can force an immediate save when the admin says yes.
+  const dirtyRef = useRef(false)
+  useImperativeHandle(ref, () => ({
+    isDirty: () => dirtyRef.current,
+    flushDraft: () => persistDraft(),
+  }))
 
   // 'pick' = choosing between an already-scheduled game or "new"; 'existing'
   // = attached to a real game_id (finish-scheduled-game.php, on save);
   // 'new' = the old always-create-a-post path (create-finished-game.php).
-  // Defaults to 'new' for an OLD draft saved before this existed, so a
-  // draft from 0.2.9 or earlier still resumes exactly where it left off
-  // instead of being sent back through a picker step it never saw.
-  const [mode, setMode] = useState(draft?.mode || (draft ? 'new' : 'pick'))
+  // Always defaults to 'pick' unless a draft already recorded an explicit
+  // choice - an older draft (saved before this existed) still has all its
+  // roster/goals data intact either way, it just goes through the picker
+  // once more (harmless - "Nav spēles? Taisīt jaunu" gets it straight
+  // back to exactly what it had).
+  const [mode, setMode] = useState(draft?.mode || 'pick')
   const [existingGameId, setExistingGameId] = useState(draft?.existingGameId || '')
 
   const [homeTeamId, setHomeTeamId] = useState(draft?.homeTeamId || '')
@@ -261,9 +264,6 @@ export default function ManualProtocol({ lookups = EMPTY_LOOKUPS, initialSeasonI
   const [preview, setPreview] = useState(null)
   const [saveState, setSaveState] = useState('idle')
   const [saveResult, setSaveResult] = useState(null)
-
-  const [creatingPlayersFor, setCreatingPlayersFor] = useState(null) // 'home' | 'away' | null
-  const [createPlayersResult, setCreatePlayersResult] = useState({ home: null, away: null })
 
   const homeTeamName = lookups.teams.find((t) => t.id === homeTeamId)?.name || ''
   const awayTeamName = lookups.teams.find((t) => t.id === awayTeamId)?.name || ''
@@ -296,15 +296,26 @@ export default function ManualProtocol({ lookups = EMPTY_LOOKUPS, initialSeasonI
     setExistingGameId('')
   }
 
-// Once a game is actually created in WP it's no longer "in progress" -
-  // persisting (or re-persisting) a draft past that point would make it
-  // reappear the next time manual entry is opened (e.g. for the NEXT
-  // game), showing stale data from this already-saved one.
+// Upserts this SAME history entry (historyId, fixed for this screen's
+  // whole lifetime) - never a different one, so autosave/explicit-save
+  // and the final "mark it published" write below all land on the one
+  // card the main screen shows for this protocol. Still writable once
+  // saveState is 'saved' (unlike the old single-slot draft, which
+  // stopped touching itself at that point) - see the effect below,
+  // which is what actually flips status to 'saved' and attaches the
+  // real game_id once publishing succeeds.
   function persistDraft() {
-    if (saveState === 'saved') return false
     try {
       const data = { mode, existingGameId, homeTeamId, awayTeamId, seasonIndex, venueId, kickoff, homeRoster, awayRoster, homeGoals, awayGoals, homePenalties, awayPenalties, goalieChanges, periodHome, periodAway }
-      localStorage.setItem(DRAFT_KEY, JSON.stringify(data))
+      upsertHistoryEntry({
+        id: historyId,
+        status: saveState === 'saved' ? 'saved' : 'draft',
+        updatedAt: new Date().toISOString(),
+        homeTeamName, awayTeamName, kickoff,
+        gameId: saveState === 'saved' ? (saveResult?.game_id ?? null) : null,
+        data,
+      })
+      dirtyRef.current = false
       return true
     } catch (err) {
       setError(`Neizdevās saglabāt melnrakstu: ${err.message}`)
@@ -317,20 +328,30 @@ export default function ManualProtocol({ lookups = EMPTY_LOOKUPS, initialSeasonI
   function saveDraft() {
     if (persistDraft()) setDraftSavedAt(new Date())
   }
-  function clearDraft() {
-    try {
-      localStorage.removeItem(DRAFT_KEY)
-    } catch { /* ignore */ }
-  }
+  // The moment publishing actually succeeds, re-persist immediately (not
+  // waiting on the debounce) so the history card flips to "Publicēts"
+  // with its real game_id right away.
   useEffect(() => {
-    if (saveState === 'saved') clearDraft()
+    if (saveState === 'saved') persistDraft()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [saveState])
 
   // Silent autosave, on top of the explicit save-draft button - covers
   // the case the admin DIDN'T get a chance to click it (app closed/
   // updated mid-entry). Debounced so typing a name doesn't write to
-  // localStorage on every single keystroke.
+  // localStorage on every single keystroke. `dirtyRef` flips true the
+  // instant something changes (read by the header's "leave this screen?"
+  // confirm via the imperative handle below, so it can skip the prompt
+  // entirely once the debounce has already caught up) and back to false
+  // the moment persistDraft() actually succeeds - skipped on the very
+  // first run (mount/draft-restore), which isn't a real change.
+  const isFirstAutosaveRun = useRef(true)
   useEffect(() => {
+    if (isFirstAutosaveRun.current) {
+      isFirstAutosaveRun.current = false
+    } else {
+      dirtyRef.current = true
+    }
     const timer = setTimeout(() => {
       if (persistDraft()) setDraftSavedAt(new Date())
     }, 800)
@@ -363,29 +384,30 @@ export default function ManualProtocol({ lookups = EMPTY_LOOKUPS, initialSeasonI
     setAwayRoster(roster.map((p) => ({ id: uid(), jersey: p.number != null ? String(p.number) : '', name: p.name, poz: GROUP_TO_POZ[p.group] || '' })))
   }, [awayTeamId]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  async function handleCreateMissingPlayers(side) {
+  // Called automatically as part of handlePreview (below) - not a
+  // separate button, per explicit feedback that a button doing this was
+  // too easy to miss and shouldn't require a manual step at all. Returns
+  // null on a clean success (nothing worth telling the admin - the
+  // preview itself proves it worked, by those players now resolving) or
+  // a short note on failure, to prepend to the preview's own notes list
+  // rather than blocking the whole preview.
+  async function createMissingPlayersForSide(side) {
     const teamId = side === 'home' ? homeTeamId : awayTeamId
     const roster = side === 'home' ? homeRoster : awayRoster
-    if (!teamId) return
-    setCreatingPlayersFor(side)
-    setCreatePlayersResult((r) => ({ ...r, [side]: null }))
+    if (!teamId) return null
+    const players = roster
+      .filter((r) => r.name.trim())
+      .map((r) => ({ name: r.name.trim(), jersey: r.jersey.trim() || null, group: POZ_TO_GROUP[r.poz] || null }))
+    if (players.length === 0) return null
+    const sideLabel = side === 'home' ? 'mājas' : 'viesu'
     try {
-      const players = roster
-        .filter((r) => r.name.trim())
-        .map((r) => ({ name: r.name.trim(), jersey: r.jersey.trim() || null, group: POZ_TO_GROUP[r.poz] || null }))
       const result = await createMissingPlayers({ teamId, players })
-      const created = result.filter((r) => r.created).length
       const failed = result.filter((r) => r.error)
-      setCreatePlayersResult((r) => ({
-        ...r,
-        [side]: failed.length > 0
-          ? `Izveidoti ${created} jauni spēlētāji, bet ${failed.length} neizdevās: ${failed.map((f) => f.name).join(', ')}`
-          : `Gatavs - izveidoti ${created} jauni spēlētāji (pārējie jau eksistēja WP).`,
-      }))
+      return failed.length > 0
+        ? `${sideLabel} komandai neizdevās izveidot: ${failed.map((f) => f.name).join(', ')}`
+        : null
     } catch (err) {
-      setCreatePlayersResult((r) => ({ ...r, [side]: `Neizdevās: ${err.message}` }))
-    } finally {
-      setCreatingPlayersFor(null)
+      return `Neizdevās izveidot iztrūkstošos ${sideLabel} spēlētājus WP: ${err.message}`
     }
   }
 
@@ -453,8 +475,19 @@ export default function ManualProtocol({ lookups = EMPTY_LOOKUPS, initialSeasonI
     setLoadingPreview(true)
     setError(null)
     try {
+      // Automatic, not a separate button an admin could miss - any
+      // roster name that doesn't already exist in WP gets created (and
+      // added to that team's roster) right before building the preview,
+      // so a brand-new international team's first game doesn't need a
+      // wp-admin detour first. Failures are surfaced as preview notes
+      // rather than blocking the preview outright.
+      const playerCreationNotes = (
+        await Promise.all([createMissingPlayersForSide('home'), createMissingPlayersForSide('away')])
+      ).filter(Boolean)
+
       const parsed = buildParsed()
       const result = await createManualGamePreview({ parsed, homeTeamId, awayTeamId, aIsHome: true })
+      result.notes = [...playerCreationNotes, ...result.notes]
       // Attached client-side (never sent to/read from WP - see this
       // component's own periodHome/periodAway comment) purely so the
       // preview can reuse PeriodScoresTable, same display the real PDF
@@ -683,9 +716,6 @@ export default function ManualProtocol({ lookups = EMPTY_LOOKUPS, initialSeasonI
               setGoals={setHomeGoals}
               penalties={homePenalties}
               setPenalties={setHomePenalties}
-              onCreateMissingPlayers={homeTeamId ? () => handleCreateMissingPlayers('home') : null}
-              creatingPlayers={creatingPlayersFor === 'home'}
-              createPlayersMessage={createPlayersResult.home}
             />
             <TeamProtocolPanel
               label="B komanda (viesi)"
@@ -696,9 +726,6 @@ export default function ManualProtocol({ lookups = EMPTY_LOOKUPS, initialSeasonI
               setGoals={setAwayGoals}
               penalties={awayPenalties}
               setPenalties={setAwayPenalties}
-              onCreateMissingPlayers={awayTeamId ? () => handleCreateMissingPlayers('away') : null}
-              creatingPlayers={creatingPlayersFor === 'away'}
-              createPlayersMessage={createPlayersResult.away}
             />
           </div>
 
@@ -779,7 +806,7 @@ export default function ManualProtocol({ lookups = EMPTY_LOOKUPS, initialSeasonI
               disabled={saveState === 'saving' || saveState === 'saved'}
               className="bg-accent text-ink font-bold uppercase text-sm tracking-wide px-6 py-3 rounded-lg hover:bg-red-600 transition-colors disabled:opacity-50"
             >
-              {saveState === 'saving' ? 'Izveido...' : 'Izveidot spēli'}
+              {saveState === 'saving' ? 'Publicē...' : 'Publicēt'}
             </button>
             <button
               type="button"
@@ -808,16 +835,15 @@ export default function ManualProtocol({ lookups = EMPTY_LOOKUPS, initialSeasonI
       )}
     </div>
   )
-}
+})
+
+export default ManualProtocol
 
 // One team's own slice of the paper protocol: roster + its own Vārti
 // (goals) + Sodi (penalties) sub-tables, matching the paper's own
 // "A komanda" / "B komanda" sections (each printed with its own roster,
 // goals and penalties - never split across a shared table).
-function TeamProtocolPanel({
-  label, teamName, roster, setRoster, goals, setGoals, penalties, setPenalties,
-  onCreateMissingPlayers, creatingPlayers, createPlayersMessage,
-}) {
+function TeamProtocolPanel({ label, teamName, roster, setRoster, goals, setGoals, penalties, setPenalties }) {
   return (
     <div className="bg-card border border-line rounded-lg p-4 space-y-4">
       <h3 className="text-accent font-bold text-sm uppercase tracking-wide">
@@ -826,19 +852,6 @@ function TeamProtocolPanel({
       </h3>
 
       <RosterEditor roster={roster} setRoster={setRoster} />
-      {onCreateMissingPlayers && (
-        <div>
-          <button
-            type="button"
-            onClick={onCreateMissingPlayers}
-            disabled={creatingPlayers}
-            className="text-accent text-xs font-semibold hover:underline disabled:opacity-50"
-          >
-            {creatingPlayers ? 'Izveido...' : '+ Izveidot iztrūkstošos spēlētājus WP'}
-          </button>
-          {createPlayersMessage && <p className="text-ink-faint text-xs mt-1">{createPlayersMessage}</p>}
-        </div>
-      )}
       <GoalsEditor rows={goals} setRows={setGoals} />
       <PenaltiesEditor rows={penalties} setRows={setPenalties} />
     </div>

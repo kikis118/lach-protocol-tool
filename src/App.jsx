@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { pickPdf, parseProtocol, saveGame, getCredentials, setCredentials, validateCredentials, openExternal, getLookups, checkForUpdates, getUpdateStatus, installUpdate, onUpdateStatus } from './api'
 import GamePicker from './components/GamePicker'
 import PreviewGame from './components/PreviewGame'
@@ -6,6 +6,7 @@ import CreateNewGame from './components/CreateNewGame'
 import ManualProtocol from './components/ManualProtocol'
 import Setup from './components/Setup'
 import UpdateBadge from './components/UpdateBadge'
+import { listHistory, removeHistoryEntry, newHistoryId } from './protocolHistory'
 
 // How long a saved login is trusted without being re-checked against
 // WordPress - like a "stay signed in" session rather than a real login
@@ -29,6 +30,16 @@ export default function App() {
   const [saveResult, setSaveResult] = useState(null)
   const [creatingNew, setCreatingNew] = useState(false)
   const [manualEntry, setManualEntry] = useState(false)
+  const manualProtocolRef = useRef(null)
+  // Which history entry ManualProtocol is currently attached to - a
+  // fresh id for a brand-new protocol, or an existing entry's own id +
+  // its saved data when resuming a draft from the list below. Refreshed
+  // from localStorage every time the main screen is shown (mount, and
+  // whenever handleReset returns here), not kept live while the child is
+  // open - it autosaves to the SAME id, so nothing is lost either way.
+  const [historyList, setHistoryList] = useState(() => listHistory())
+  const [activeHistoryId, setActiveHistoryId] = useState(null)
+  const [activeHistoryData, setActiveHistoryData] = useState(null)
 
   const [lookups, setLookups] = useState(null)
   const [seasonIndex, setSeasonIndex] = useState('') // '' = visas sezonas (no scoping)
@@ -128,6 +139,27 @@ export default function App() {
     setSaveState('idle')
     setCreatingNew(false)
     setManualEntry(false)
+    setActiveHistoryId(null)
+    setActiveHistoryData(null)
+    setHistoryList(listHistory())
+  }
+
+  function handleStartManualEntry() {
+    setActiveHistoryId(newHistoryId())
+    setActiveHistoryData(null)
+    setManualEntry(true)
+  }
+
+  function handleResumeHistoryEntry(entry) {
+    setActiveHistoryId(entry.id)
+    setActiveHistoryData(entry.data)
+    setManualEntry(true)
+  }
+
+  function handleDeleteHistoryEntry(id) {
+    if (!window.confirm('Vai tiešām dzēst šo protokolu no saraksta?')) return
+    removeHistoryEntry(id)
+    setHistoryList(listHistory())
   }
 
   // Only ever offered while nothing has actually been sent to WordPress
@@ -137,7 +169,25 @@ export default function App() {
   // completion by default even if the caller gives up waiting, so a
   // "cancel" at that point could look like it worked while the write
   // still happens. Safer to just not offer it there than to fake it.
+  //
+  // Manual entry is a genuinely different case, once it exists: it
+  // autosaves its own draft, so "you'll lose everything" is usually just
+  // false - only ask when there's a real, not-yet-persisted change (the
+  // ref's isDirty), and word it as a save prompt rather than a data-loss
+  // warning. Answering yes force-flushes that draft before leaving, so
+  // it's never a race against the ~800ms debounce.
   function handleCancel() {
+    if (manualEntry && manualProtocolRef.current) {
+      if (!manualProtocolRef.current.isDirty()) {
+        handleReset()
+        return
+      }
+      if (window.confirm('Protokols nav saglabāts. Saglabāt?')) {
+        manualProtocolRef.current.flushDraft()
+        handleReset()
+      }
+      return
+    }
     if (window.confirm('Vai tiešām vēlies atcelt? Neviena informācija netiks saglabāta.')) {
       handleReset()
     }
@@ -280,7 +330,7 @@ export default function App() {
                   <div className="mt-auto">
                     <button
                       type="button"
-                      onClick={() => setManualEntry(true)}
+                      onClick={handleStartManualEntry}
                       className="bg-accent text-ink font-bold uppercase text-sm tracking-wide px-6 py-3 rounded-lg hover:bg-red-600 hover:scale-[1.02] active:scale-[0.98] transition-all"
                     >
                       Ievadīt ar roku
@@ -290,8 +340,65 @@ export default function App() {
               </div>
             )}
 
+            {!result && !manualEntry && historyList.length > 0 && (
+              <div className="bg-card border border-line rounded-lg p-6 space-y-3">
+                <h2 className="text-lg font-black uppercase text-ink tracking-wide">Protokolu vēsture</h2>
+                <div className="space-y-2">
+                  {historyList.map((entry) => (
+                    <div
+                      key={entry.id}
+                      className="flex items-center gap-3 bg-surface border border-line-strong rounded-md px-3 py-2"
+                    >
+                      <button
+                        type="button"
+                        onClick={() =>
+                          entry.status === 'saved'
+                            ? openExternal(`https://lach.lv/wp-admin/post.php?post=${entry.gameId}&action=edit`)
+                            : handleResumeHistoryEntry(entry)
+                        }
+                        className="flex-1 text-left"
+                      >
+                        <span className="text-ink font-semibold text-sm">
+                          {entry.homeTeamName || 'Mājas'} vs {entry.awayTeamName || 'Viesi'}
+                        </span>
+                        {entry.kickoff && (
+                          <span className="text-ink-faint text-xs ml-2">{entry.kickoff.replace('T', ' ')}</span>
+                        )}
+                      </button>
+                      <span
+                        className={`text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded ${
+                          entry.status === 'saved'
+                            ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30'
+                            : 'bg-amber-500/10 text-amber-400 border border-amber-500/30'
+                        }`}
+                      >
+                        {entry.status === 'saved' ? 'Publicēts' : 'Melnraksts'}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteHistoryEntry(entry.id)}
+                        aria-label="Dzēst"
+                        title="Dzēst"
+                        className="w-7 h-7 shrink-0 rounded-md text-ink-faint hover:text-red-400 hover:bg-red-500/10 transition-colors flex items-center justify-center"
+                      >
+                        &times;
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {manualEntry && (
-              <ManualProtocol lookups={lookups} initialSeasonIndex={seasonIndex} credentials={credentials} onCancel={handleCancel} />
+              <ManualProtocol
+                ref={manualProtocolRef}
+                lookups={lookups}
+                initialSeasonIndex={seasonIndex}
+                credentials={credentials}
+                historyId={activeHistoryId}
+                initialData={activeHistoryData}
+                onCancel={handleCancel}
+              />
             )}
 
             {result && (result.status === 'ambiguous' || result.status === 'none') && !creatingNew && (
