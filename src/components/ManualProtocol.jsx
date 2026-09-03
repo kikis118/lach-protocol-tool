@@ -33,15 +33,14 @@ function isDevUser(credentials) {
   return (credentials?.username || '').trim().toLowerCase() === 'kikis'
 }
 
-// Recovery tool: rebuilds roster rows (jersey + name only - everything
-// needed to repopulate homeRoster/awayRoster) from a plain copy-paste of
-// this SAME screen's own rendered box-score tables (jersey<TAB>name
-// [+ concatenated "nav atpazīts" badge text, no space between them since
-// there's none in the rendered DOM]<TAB>G<TAB>A<TAB>PIM per row, a team-
-// name-only line marking the switch from home to away). One-time-use
-// escape hatch for exactly the "had this filled in, need it back" case -
-// not a general import tool, which is why it's dev-tools-gated rather
-// than a real feature of the form.
+// Recovery tool, legacy/fallback form: rebuilds roster rows (jersey +
+// name only) from a plain copy-paste of this screen's own rendered box-
+// score tables (jersey<TAB>name [+ concatenated "nav atpazīts" badge
+// text, no space between them since there's none in the rendered DOM]
+// <TAB>G<TAB>A<TAB>PIM per row, a team-name-only line marking the switch
+// from home to away). Superseded by the JSON snapshot format below for
+// anything created after that was added, but kept working since a
+// screenshot/paste taken before then only has this shape.
 function parsePastedRoster(text, homeTeamName, awayTeamName) {
   const home = []
   const away = []
@@ -72,7 +71,43 @@ function parsePastedRoster(text, homeTeamName, awayTeamName) {
   return { home, away }
 }
 
-function DevTools({ credentials, homeTeamName, awayTeamName, onRestoreRoster }) {
+// One-time-use recovery escape hatch, not a general import tool (which
+// is why it's dev-tools-gated rather than a real feature of the form).
+// Accepts a JSON snapshot - {home: {roster, goals, penalties}, away:
+// {...}}, each row shaped like this form's own row objects minus `id` -
+// and restores ALL of it (roster + goals + penalties, both teams) in
+// one paste. Falls back to the older plain-text box-score-only parser
+// above for anything that isn't valid JSON, so a paste taken before this
+// format existed still works (roster only, matching what that format
+// ever captured).
+function parseDevPaste(text, homeTeamName, awayTeamName) {
+  const trimmed = text.trim()
+  if (trimmed.startsWith('{')) {
+    try {
+      const data = JSON.parse(trimmed)
+      const toRoster = (rows) => (rows || []).map((r) => ({ id: uid(), jersey: r.jersey || '', name: r.name || '', poz: r.poz || '' }))
+      const toGoals = (rows) => (rows || []).map((r) => ({
+        id: uid(), time: r.time || '', scorerJersey: r.scorerJersey || '',
+        assist1Jersey: r.assist1Jersey || '', assist2Jersey: r.assist2Jersey || '', situation: r.situation || '',
+      }))
+      const toPenalties = (rows) => (rows || []).map((r) => ({
+        id: uid(), jersey: r.jersey || '', minutes: r.minutes || '', infraction: r.infraction || '',
+        slStart: r.slStart || '', blEnd: r.blEnd || '',
+      }))
+      return {
+        full: true,
+        home: { roster: toRoster(data.home?.roster), goals: toGoals(data.home?.goals), penalties: toPenalties(data.home?.penalties) },
+        away: { roster: toRoster(data.away?.roster), goals: toGoals(data.away?.goals), penalties: toPenalties(data.away?.penalties) },
+      }
+    } catch {
+      // Not valid JSON after all - fall through to the legacy parser.
+    }
+  }
+  const { home, away } = parsePastedRoster(text, homeTeamName, awayTeamName)
+  return { full: false, home: { roster: home, goals: [], penalties: [] }, away: { roster: away, goals: [], penalties: [] } }
+}
+
+function DevTools({ credentials, homeTeamName, awayTeamName, onRestoreAll }) {
   const [open, setOpen] = useState(false)
   const [pasteOpen, setPasteOpen] = useState(false)
   const [text, setText] = useState('')
@@ -81,9 +116,13 @@ function DevTools({ credentials, homeTeamName, awayTeamName, onRestoreRoster }) 
   if (!isDevUser(credentials)) return null
 
   function handleRestore() {
-    const { home, away } = parsePastedRoster(text, homeTeamName, awayTeamName)
-    onRestoreRoster(home, away)
-    setResult(`Atjaunoti: ${home.length} mājas spēlētāji, ${away.length} viesu spēlētāji.`)
+    const parsed = parseDevPaste(text, homeTeamName, awayTeamName)
+    onRestoreAll(parsed)
+    setResult(
+      parsed.full
+        ? `Atjaunots viss: ${parsed.home.roster.length}/${parsed.away.roster.length} spēlētāji, ${parsed.home.goals.length}/${parsed.away.goals.length} vārti, ${parsed.home.penalties.length}/${parsed.away.penalties.length} sodi (mājas/viesi).`
+        : `Atjaunots tikai sastāvs (vecais formāts): ${parsed.home.roster.length} mājas, ${parsed.away.roster.length} viesu spēlētāji.`,
+    )
   }
 
   return (
@@ -102,7 +141,7 @@ function DevTools({ credentials, homeTeamName, awayTeamName, onRestoreRoster }) 
             onClick={() => setPasteOpen((o) => !o)}
             className="text-accent text-xs font-semibold hover:underline"
           >
-            Ielīmēt sastāvu no kopijas (atjauno abu komandu sarakstus)
+            Ielīmēt saglabātu JSON momentuzņēmumu (atjauno sastāvu + vārtus + sodus, abām komandām)
           </button>
           {pasteOpen && (
             <div className="space-y-2">
@@ -110,7 +149,7 @@ function DevTools({ credentials, homeTeamName, awayTeamName, onRestoreRoster }) 
                 value={text}
                 onChange={(e) => setText(e.target.value)}
                 rows={6}
-                placeholder="Ielīmē abu komandu box-score tabulas (kopētas no šīs pašas lapas)..."
+                placeholder="Ielīmē JSON momentuzņēmumu (vai vecāku box-score kopiju)..."
                 className="w-full bg-surface border border-line-strong rounded-md px-3 py-2 text-ink text-xs font-mono focus:outline-none focus:border-accent"
               />
               <button
@@ -119,7 +158,7 @@ function DevTools({ credentials, homeTeamName, awayTeamName, onRestoreRoster }) 
                 disabled={!text.trim()}
                 className="bg-card border border-line-strong text-ink-secondary hover:border-accent hover:text-ink font-bold uppercase text-xs tracking-wide px-4 py-2 rounded-lg transition-colors disabled:opacity-50"
               >
-                Atjaunot sastāvu
+                Atjaunot
               </button>
               {result && <p className="text-emerald-400 text-xs font-semibold">{result}</p>}
             </div>
@@ -441,7 +480,16 @@ export default function ManualProtocol({ lookups = EMPTY_LOOKUPS, initialSeasonI
         credentials={credentials}
         homeTeamName={homeTeamName}
         awayTeamName={awayTeamName}
-        onRestoreRoster={(home, away) => { setHomeRoster(home); setAwayRoster(away) }}
+        onRestoreAll={(parsed) => {
+          setHomeRoster(parsed.home.roster)
+          setAwayRoster(parsed.away.roster)
+          if (parsed.full) {
+            setHomeGoals(parsed.home.goals)
+            setAwayGoals(parsed.away.goals)
+            setHomePenalties(parsed.home.penalties)
+            setAwayPenalties(parsed.away.penalties)
+          }
+        }}
       />
 
       {!preview && (
