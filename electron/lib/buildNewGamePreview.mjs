@@ -116,6 +116,45 @@ export function buildNewGamePreview(parsed, { homeTeamId, awayTeamId, aIsHome },
     blEnd: p.blEnd,
   }))
 
+  // The site's own goal-by-goal/penalty timeline (ScoringSummary/
+  // PenaltySummary on GameDetail.jsx) normally comes from a completely
+  // separate pipeline: scripts/parse-protocols.mjs (lach-hockey-app repo)
+  // re-parses each game's linked PDF nightly into a static
+  // src/data/game-events.json. A manually-entered game has no PDF for
+  // that job to ever find - `goals`/`penalties` above were being built
+  // ONLY for this tool's own on-screen preview and then discarded, so
+  // every EAHF game entered by hand showed a score but no goals/sodi at
+  // all on the live site, forever. This carries the same event detail
+  // (plus real player IDs, so the site can link to profiles - the
+  // preview-only arrays above intentionally don't need those) into the
+  // WP payload under a new `_lach_`-prefixed field (see
+  // full-data-v2.php's `game_details[id].events`), read by the website's
+  // DataContext.jsx as a live fallback/override for exactly this case.
+  const eventsForWp = {
+    goals: parsed.goals.map((g) => ({
+      teamId: g.team === homeSide ? homeTeamId : awayTeamId,
+      time: g.time,
+      situation: g.situation,
+      isShootout: g.isShootout,
+      scorerPlayerId: g.scorerPlayerId ?? null,
+      scorerName: nameFor(g.team, g.scorerJersey) || g.scorerName || null,
+      assist1PlayerId: g.assist1PlayerId ?? null,
+      assist1Name: g.assist1Jersey ? nameFor(g.team, g.assist1Jersey) || g.assist1Name : null,
+      assist2PlayerId: g.assist2PlayerId ?? null,
+      assist2Name: g.assist2Jersey ? nameFor(g.team, g.assist2Jersey) || g.assist2Name : null,
+    })),
+    penalties: parsed.penalties.map((p) => ({
+      teamId: p.team === homeSide ? homeTeamId : awayTeamId,
+      penalizedPlayerId: p.penalizedPlayerId ?? null,
+      penalizedName: p.jersey ? nameFor(p.team, p.jersey) || p.penalizedName : null,
+      infraction: p.infraction,
+      minutes: p.minutes,
+      slStart: p.slStart,
+      blEnd: p.blEnd,
+    })),
+    goalieChanges: parsed.goalieChanges || [],
+  }
+
   const finalScore = {
     home: goals.filter((g) => g.isHome).length,
     away: goals.filter((g) => !g.isHome).length,
@@ -156,6 +195,7 @@ export function buildNewGamePreview(parsed, { homeTeamId, awayTeamId, aIsHome },
       _sl_player_stats_away: awayStats.payload,
       _sl_players_home: homePlayers.payload,
       _sl_players_away: awayPlayers.payload,
+      _lach_events: eventsForWp,
     },
     notes: [...statsA.notes, ...statsB.notes, ...playersA.notes, ...playersB.notes],
     goalCountMatchesProtocol: parsed.qa.goalCountMatches,
