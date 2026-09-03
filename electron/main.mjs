@@ -366,6 +366,15 @@ ipcMain.handle('lookups:get', async () => {
     // lets it prefill each team's roster (jersey/name) so the admin picks
     // from known players instead of retyping them from scratch.
     teamDetails: data.team_details || {},
+    // Also only for manual entry - lets it offer a "pick the already-
+    // scheduled game" step (see finish-scheduled-game.php) instead of
+    // always creating a brand-new game post, which was silently creating
+    // duplicates of EAHF's pre-scheduled group-stage games (confirmed
+    // live on game 1216 vs the wrongly-created 1243, 2026-09-03).
+    games: (data.games || []).map((g) => ({
+      game_id: g.game_id, home_team: g.home_team, away_team: g.away_team,
+      kickoff: g.kickoff, venue_id: g.venue_id, tournament_id: g.tournament_id, finished: g.finished,
+    })),
   }
 })
 
@@ -424,6 +433,32 @@ ipcMain.handle('players:createMissing', async (_event, { teamId, players }) => {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: wpAuthHeader() },
     body: JSON.stringify({ team_id: teamId, players }),
+  })
+  const body = await res.json()
+  if (!res.ok) throw new Error(body.error || body.message || `HTTP ${res.status}`)
+  return body
+})
+
+// Resolves an ALREADY-SCHEDULED game (e.g. EAHF's pre-created group-
+// stage games) instead of creating a new post - see
+// finish-scheduled-game.php's own comment for why create-finished-game
+// below is the wrong tool for that case. home_team/away_team are
+// deliberately NOT sent - the endpoint reads them off the game's own
+// already-scheduled row, so this can never misattribute stats to the
+// wrong team.
+ipcMain.handle('game:finishScheduled', async (_event, { gameId, gameFields, payload }) => {
+  const res = await fetch(`${WP_API}/finish-scheduled-game/${gameId}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: wpAuthHeader() },
+    body: JSON.stringify({
+      home_scores: gameFields.home_scores,
+      away_scores: gameFields.away_scores,
+      home_outcome: gameFields.home_outcome,
+      away_outcome: gameFields.away_outcome,
+      home_points: gameFields.home_points,
+      away_points: gameFields.away_points,
+      ...payload,
+    }),
   })
   const body = await res.json()
   if (!res.ok) throw new Error(body.error || body.message || `HTTP ${res.status}`)

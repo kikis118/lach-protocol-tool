@@ -16,6 +16,7 @@ contextBridge.exposeInMainWorld('lachTool', {
   createManualGamePreview: (args) => ipcRenderer.invoke('game:createManualPreview', args),
   createMissingPlayers: (args) => ipcRenderer.invoke('players:createMissing', args),
   createNewGameSave: (args) => ipcRenderer.invoke('game:createNewSave', args),
+  finishScheduledGame: (args) => ipcRenderer.invoke('game:finishScheduled', args),
   checkForUpdates: () => ipcRenderer.invoke('updates:check'),
   getUpdateStatus: () => ipcRenderer.invoke('updates:status'),
   installUpdate: () => ipcRenderer.invoke('updates:install'),

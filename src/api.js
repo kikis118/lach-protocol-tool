@@ -48,6 +48,10 @@ export function createMissingPlayers(args) {
   return window.lachTool.createMissingPlayers(args)
 }
 
+export function finishScheduledGame(args) {
+  return window.lachTool.finishScheduledGame(args)
+}
+
 export function createNewGameSave(args) {
   return window.lachTool.createNewGameSave(args)
 }

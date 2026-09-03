@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { createManualGamePreview, createMissingPlayers, createNewGameSave, openExternal } from '../api'
+import { createManualGamePreview, createMissingPlayers, createNewGameSave, finishScheduledGame, openExternal } from '../api'
 import { PeriodScoresTable, BoxScoreTable, GoalsList, PenaltiesList } from './GameSummary'
 
 // Saved to localStorage (survives an app update/relaunch, unlike plain
@@ -210,14 +210,28 @@ function fromDatetimeLocal(value) {
   if (!value) return ''
   return value.replace('T', ' ') + ':00'
 }
+// WP's own "YYYY-MM-DD HH:MM:SS" -> the <input type="datetime-local">
+// value shape, for prefilling from an already-scheduled game's kickoff.
+function kickoffToInputValue(kickoff) {
+  return (kickoff || '').replace(' ', 'T').slice(0, 16)
+}
 
-const EMPTY_LOOKUPS = { seasonCombos: [], teams: [], venues: [], teamDetails: {} }
+const EMPTY_LOOKUPS = { seasonCombos: [], teams: [], venues: [], teamDetails: {}, games: [] }
 
 export default function ManualProtocol({ lookups = EMPTY_LOOKUPS, initialSeasonIndex, credentials = null, onCancel }) {
   const [error, setError] = useState(null)
   // Loaded once, at mount - a later save just overwrites the same slot.
   const [draft] = useState(() => loadDraft())
   const [draftSavedAt, setDraftSavedAt] = useState(null)
+
+  // 'pick' = choosing between an already-scheduled game or "new"; 'existing'
+  // = attached to a real game_id (finish-scheduled-game.php, on save);
+  // 'new' = the old always-create-a-post path (create-finished-game.php).
+  // Defaults to 'new' for an OLD draft saved before this existed, so a
+  // draft from 0.2.9 or earlier still resumes exactly where it left off
+  // instead of being sent back through a picker step it never saw.
+  const [mode, setMode] = useState(draft?.mode || (draft ? 'new' : 'pick'))
+  const [existingGameId, setExistingGameId] = useState(draft?.existingGameId || '')
 
   const [homeTeamId, setHomeTeamId] = useState(draft?.homeTeamId || '')
   const [awayTeamId, setAwayTeamId] = useState(draft?.awayTeamId || '')
@@ -253,6 +267,34 @@ export default function ManualProtocol({ lookups = EMPTY_LOOKUPS, initialSeasonI
 
   const homeTeamName = lookups.teams.find((t) => t.id === homeTeamId)?.name || ''
   const awayTeamName = lookups.teams.find((t) => t.id === awayTeamId)?.name || ''
+  const teamNameById = (id) => lookups.teams.find((t) => String(t.id) === String(id))?.name || `#${id}`
+
+  // Every not-yet-played game already scheduled for the chosen season/
+  // tournament - offered so the admin attaches this protocol to the
+  // REAL scheduled game (finish-scheduled-game.php) instead of always
+  // creating a brand-new post, which was silently creating duplicates of
+  // EAHF's pre-scheduled group-stage games (confirmed live, game 1216 vs
+  // the wrongly-created 1243, 2026-09-03 - see that endpoint's comment).
+  const seasonCombo = seasonIndex !== '' ? lookups.seasonCombos[seasonIndex] : null
+  const scheduledGames = seasonCombo
+    ? (lookups.games || [])
+        .filter((g) => String(g.tournament_id) === String(seasonCombo.tournamentId) && g.finished !== '1')
+        .slice()
+        .sort((a, b) => new Date(a.kickoff) - new Date(b.kickoff))
+    : []
+
+  function pickExistingGame(g) {
+    setMode('existing')
+    setExistingGameId(String(g.game_id))
+    setHomeTeamId(String(g.home_team))
+    setAwayTeamId(String(g.away_team))
+    setVenueId(String(g.venue_id))
+    setKickoff(kickoffToInputValue(g.kickoff))
+  }
+  function backToPicker() {
+    setMode('pick')
+    setExistingGameId('')
+  }
 
 // Once a game is actually created in WP it's no longer "in progress" -
   // persisting (or re-persisting) a draft past that point would make it
@@ -261,7 +303,7 @@ export default function ManualProtocol({ lookups = EMPTY_LOOKUPS, initialSeasonI
   function persistDraft() {
     if (saveState === 'saved') return false
     try {
-      const data = { homeTeamId, awayTeamId, seasonIndex, venueId, kickoff, homeRoster, awayRoster, homeGoals, awayGoals, homePenalties, awayPenalties, goalieChanges, periodHome, periodAway }
+      const data = { mode, existingGameId, homeTeamId, awayTeamId, seasonIndex, venueId, kickoff, homeRoster, awayRoster, homeGoals, awayGoals, homePenalties, awayPenalties, goalieChanges, periodHome, periodAway }
       localStorage.setItem(DRAFT_KEY, JSON.stringify(data))
       return true
     } catch (err) {
@@ -295,7 +337,7 @@ export default function ManualProtocol({ lookups = EMPTY_LOOKUPS, initialSeasonI
     return () => clearTimeout(timer)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
-    homeTeamId, awayTeamId, seasonIndex, venueId, kickoff,
+    mode, existingGameId, homeTeamId, awayTeamId, seasonIndex, venueId, kickoff,
     homeRoster, awayRoster, homeGoals, awayGoals, homePenalties, awayPenalties,
     goalieChanges, periodHome, periodAway,
   ])
@@ -347,7 +389,7 @@ export default function ManualProtocol({ lookups = EMPTY_LOOKUPS, initialSeasonI
     }
   }
 
-  const canPreview = homeTeamId && awayTeamId && homeTeamId !== awayTeamId && seasonIndex !== '' && venueId && kickoff
+  const canPreview = mode !== 'pick' && homeTeamId && awayTeamId && homeTeamId !== awayTeamId && seasonIndex !== '' && venueId && kickoff
 
   function buildParsed() {
     const toPlayers = (roster) => roster.filter((r) => r.name.trim()).map((r) => ({ name: r.name.trim(), jersey: r.jersey.trim() || null }))
@@ -437,15 +479,21 @@ export default function ManualProtocol({ lookups = EMPTY_LOOKUPS, initialSeasonI
   async function handleCreate() {
     setSaveState('saving')
     try {
-      const result = await createNewGameSave({
-        seasonCombo: lookups.seasonCombos[seasonIndex],
-        homeTeamId,
-        awayTeamId,
-        venueId,
-        kickoff: fromDatetimeLocal(kickoff),
-        gameFields: preview.gameFields,
-        payload: preview.payload,
-      })
+      const result = mode === 'existing'
+        ? await finishScheduledGame({
+            gameId: existingGameId,
+            gameFields: preview.gameFields,
+            payload: preview.payload,
+          })
+        : await createNewGameSave({
+            seasonCombo: lookups.seasonCombos[seasonIndex],
+            homeTeamId,
+            awayTeamId,
+            venueId,
+            kickoff: fromDatetimeLocal(kickoff),
+            gameFields: preview.gameFields,
+            payload: preview.payload,
+          })
       setSaveState('saved')
       setSaveResult(result)
     } catch (err) {
@@ -494,61 +542,137 @@ export default function ManualProtocol({ lookups = EMPTY_LOOKUPS, initialSeasonI
 
       {!preview && (
         <>
-          <div className="bg-card border border-line rounded-lg p-6 space-y-4">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <Field label="Mājas komanda">
-                <TeamSelect teams={lookups.teams} value={homeTeamId} onChange={setHomeTeamId} />
+          {mode === 'pick' && (
+            <div className="bg-card border border-line rounded-lg p-6 space-y-4">
+              <Field label="Sezona / turnīrs">
+                <select
+                  value={seasonIndex}
+                  onChange={(e) => setSeasonIndex(e.target.value)}
+                  className="w-full bg-surface border border-line-strong rounded-md px-3 py-2 text-ink text-sm focus:outline-none focus:border-accent"
+                >
+                  <option value="">Izvēlies...</option>
+                  {lookups.seasonCombos.map((s, i) => (
+                    <option key={s.seasonId} value={i}>
+                      {s.seasonName} ({s.tournamentName})
+                    </option>
+                  ))}
+                </select>
               </Field>
-              <Field label="Viesu komanda">
-                <TeamSelect teams={lookups.teams} value={awayTeamId} onChange={setAwayTeamId} />
+
+              {seasonCombo && (
+                <div>
+                  <p className="text-xs uppercase tracking-wide text-ink-faint font-semibold mb-2">
+                    Ieplānotās spēles
+                  </p>
+                  {scheduledGames.length === 0 && (
+                    <p className="text-ink-faint text-sm mb-2">Nav ieplānotu spēļu šajā sezonā/turnīrā.</p>
+                  )}
+                  <div className="space-y-1.5">
+                    {scheduledGames.map((g) => (
+                      <button
+                        key={g.game_id}
+                        type="button"
+                        onClick={() => pickExistingGame(g)}
+                        className="w-full text-left bg-surface border border-line-strong rounded-md px-3 py-2 text-sm text-ink hover:border-accent transition-colors"
+                      >
+                        <span className="text-ink-faint text-xs mr-2">{kickoffToInputValue(g.kickoff).replace('T', ' ')}</span>
+                        {teamNameById(g.home_team)} vs {teamNameById(g.away_team)}
+                      </button>
+                    ))}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setMode('new')}
+                    className="text-accent text-sm font-semibold hover:underline mt-3"
+                  >
+                    Nav spēles? Taisīt jaunu
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {mode === 'existing' && (
+            <div className="bg-card border border-line rounded-lg p-4 flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <p className="text-xs uppercase tracking-wide text-ink-faint font-semibold mb-1">Ieplānotā spēle</p>
+                <p className="text-ink font-bold">{homeTeamName} vs {awayTeamName}</p>
+                <p className="text-ink-faint text-sm">
+                  {kickoff.replace('T', ' ')} &middot; {lookups.venues.find((v) => v.id === venueId)?.name}
+                </p>
+              </div>
+              <button type="button" onClick={backToPicker} className="text-accent text-sm font-semibold hover:underline">
+                Mainīt izvēli
+              </button>
+            </div>
+          )}
+
+          {mode === 'new' && (
+            <div className="bg-card border border-line rounded-lg p-6 space-y-4">
+              <button
+                type="button"
+                onClick={backToPicker}
+                className="text-ink-faint text-xs font-semibold hover:text-ink-secondary transition-colors"
+              >
+                &larr; Atpakaļ pie ieplānoto spēļu saraksta
+              </button>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <Field label="Mājas komanda">
+                  <TeamSelect teams={lookups.teams} value={homeTeamId} onChange={setHomeTeamId} />
+                </Field>
+                <Field label="Viesu komanda">
+                  <TeamSelect teams={lookups.teams} value={awayTeamId} onChange={setAwayTeamId} />
+                </Field>
+              </div>
+              <button
+                type="button"
+                onClick={() => openExternal('https://lach.lv/wp-admin/post-new.php?post_type=sl_team')}
+                className="text-accent text-xs font-semibold hover:underline -mt-2"
+              >
+                Komandas nav sarakstā? Izveidot jaunu komandu WP-Admin
+              </button>
+
+              <Field label="Sezona / turnīrs">
+                <select
+                  value={seasonIndex}
+                  onChange={(e) => setSeasonIndex(e.target.value)}
+                  className="w-full bg-surface border border-line-strong rounded-md px-3 py-2 text-ink text-sm focus:outline-none focus:border-accent"
+                >
+                  <option value="">Izvēlies...</option>
+                  {lookups.seasonCombos.map((s, i) => (
+                    <option key={s.seasonId} value={i}>
+                      {s.seasonName} ({s.tournamentName})
+                    </option>
+                  ))}
+                </select>
+              </Field>
+
+              <Field label="Arēna">
+                <select
+                  value={venueId}
+                  onChange={(e) => setVenueId(e.target.value)}
+                  className="w-full bg-surface border border-line-strong rounded-md px-3 py-2 text-ink text-sm focus:outline-none focus:border-accent"
+                >
+                  <option value="">Izvēlies...</option>
+                  {lookups.venues.map((v) => (
+                    <option key={v.id} value={v.id}>{v.name}</option>
+                  ))}
+                </select>
+              </Field>
+
+              <Field label="Datums un laiks">
+                <input
+                  type="datetime-local"
+                  value={kickoff}
+                  onChange={(e) => setKickoff(e.target.value)}
+                  className="w-full bg-surface border border-line-strong rounded-md px-3 py-2 text-ink text-sm focus:outline-none focus:border-accent"
+                />
               </Field>
             </div>
-            <button
-              type="button"
-              onClick={() => openExternal('https://lach.lv/wp-admin/post-new.php?post_type=sl_team')}
-              className="text-accent text-xs font-semibold hover:underline -mt-2"
-            >
-              Komandas nav sarakstā? Izveidot jaunu komandu WP-Admin
-            </button>
+          )}
 
-            <Field label="Sezona / turnīrs">
-              <select
-                value={seasonIndex}
-                onChange={(e) => setSeasonIndex(e.target.value)}
-                className="w-full bg-surface border border-line-strong rounded-md px-3 py-2 text-ink text-sm focus:outline-none focus:border-accent"
-              >
-                <option value="">Izvēlies...</option>
-                {lookups.seasonCombos.map((s, i) => (
-                  <option key={s.seasonId} value={i}>
-                    {s.seasonName} ({s.tournamentName})
-                  </option>
-                ))}
-              </select>
-            </Field>
-
-            <Field label="Arēna">
-              <select
-                value={venueId}
-                onChange={(e) => setVenueId(e.target.value)}
-                className="w-full bg-surface border border-line-strong rounded-md px-3 py-2 text-ink text-sm focus:outline-none focus:border-accent"
-              >
-                <option value="">Izvēlies...</option>
-                {lookups.venues.map((v) => (
-                  <option key={v.id} value={v.id}>{v.name}</option>
-                ))}
-              </select>
-            </Field>
-
-            <Field label="Datums un laiks">
-              <input
-                type="datetime-local"
-                value={kickoff}
-                onChange={(e) => setKickoff(e.target.value)}
-                className="w-full bg-surface border border-line-strong rounded-md px-3 py-2 text-ink text-sm focus:outline-none focus:border-accent"
-              />
-            </Field>
-          </div>
-
+          {mode !== 'pick' && (
+          <>
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             <TeamProtocolPanel
               label="A komanda (mājas)"
@@ -606,6 +730,8 @@ export default function ManualProtocol({ lookups = EMPTY_LOOKUPS, initialSeasonI
               Atcelt
             </button>
           </div>
+          </>
+          )}
           {error && <p className="text-red-400 text-sm">{error}</p>}
         </>
       )}
