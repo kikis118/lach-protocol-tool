@@ -362,6 +362,10 @@ ipcMain.handle('lookups:get', async () => {
     seasonCombos: deriveSeasonCombos(data.all_tournaments || {}, data.all_seasons || {}, data.all_leagues || {}),
     teams: Object.entries(data.teams || {}).map(([id, name]) => ({ id, name })),
     venues: Object.entries(data.venues || {}).map(([id, name]) => ({ id, name })),
+    // Only added for the manual-entry flow below (game:createManualPreview) -
+    // lets it prefill each team's roster (jersey/name) so the admin picks
+    // from known players instead of retyping them from scratch.
+    teamDetails: data.team_details || {},
   }
 })
 
@@ -383,6 +387,29 @@ ipcMain.handle('game:createNewPreview', async (_event, { filePath, homeTeamId, a
     awayTeam: { name: teams[awayTeamId], team_id: awayTeamId },
     meta,
     parsedTeams: { a: parsed.teamA.name, b: parsed.teamB.name },
+  }
+})
+
+// --- "Manual entry" (handwritten/photographed protocol, no parseable PDF) -
+//
+// Same downstream pipeline as game:createNewPreview (buildNewGamePreview
+// doesn't care where its `parsed` input came from), just skipping the PDF
+// read/text-extraction step entirely - the renderer (ManualProtocol.jsx)
+// builds a `parsed` object shaped exactly like parseProtocolItems()'s
+// output (teamA/teamB rosters, goals, penalties, goalieChanges, qa) from
+// its own form state instead. Saved via the SAME game:createNewSave handler
+// below - nothing about that endpoint is PDF-specific.
+ipcMain.handle('game:createManualPreview', async (_event, { parsed, homeTeamId, awayTeamId, aIsHome }) => {
+  const data = await fetchFullData()
+  const teamDetails = data.team_details || {}
+  const players = data.players || {}
+  const teams = data.teams || {}
+
+  const result = buildNewGamePreview(parsed, { homeTeamId, awayTeamId, aIsHome }, teamDetails, players)
+  return {
+    ...result,
+    homeTeam: { name: teams[homeTeamId], team_id: homeTeamId },
+    awayTeam: { name: teams[awayTeamId], team_id: awayTeamId },
   }
 })
 

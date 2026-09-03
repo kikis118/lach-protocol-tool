@@ -13,6 +13,7 @@ contextBridge.exposeInMainWorld('lachTool', {
   openExternal: (url) => ipcRenderer.invoke('shell:openExternal', url),
   getLookups: () => ipcRenderer.invoke('lookups:get'),
   createNewGamePreview: (args) => ipcRenderer.invoke('game:createNewPreview', args),
+  createManualGamePreview: (args) => ipcRenderer.invoke('game:createManualPreview', args),
   createNewGameSave: (args) => ipcRenderer.invoke('game:createNewSave', args),
   checkForUpdates: () => ipcRenderer.invoke('updates:check'),
   getUpdateStatus: () => ipcRenderer.invoke('updates:status'),

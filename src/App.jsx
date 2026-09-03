@@ -3,6 +3,7 @@ import { pickPdf, parseProtocol, saveGame, getCredentials, setCredentials, valid
 import GamePicker from './components/GamePicker'
 import PreviewGame from './components/PreviewGame'
 import CreateNewGame from './components/CreateNewGame'
+import ManualProtocol from './components/ManualProtocol'
 import Setup from './components/Setup'
 import UpdateBadge from './components/UpdateBadge'
 
@@ -27,6 +28,7 @@ export default function App() {
   const [saveState, setSaveState] = useState('idle') // idle | saving | saved | failed
   const [saveResult, setSaveResult] = useState(null)
   const [creatingNew, setCreatingNew] = useState(false)
+  const [manualEntry, setManualEntry] = useState(false)
 
   const [lookups, setLookups] = useState(null)
   const [seasonIndex, setSeasonIndex] = useState('') // '' = visas sezonas (no scoping)
@@ -125,6 +127,7 @@ export default function App() {
     setError(null)
     setSaveState('idle')
     setCreatingNew(false)
+    setManualEntry(false)
   }
 
   // Only ever offered while nothing has actually been sent to WordPress
@@ -151,7 +154,7 @@ export default function App() {
   function handleLogoClick() {
     if (!hasCredentials) return
     setShowSettings(false)
-    if (filePath || result || creatingNew) {
+    if (filePath || result || creatingNew || manualEntry) {
       handleCancel()
     } else {
       handleReset()
@@ -220,7 +223,7 @@ export default function App() {
           />
         ) : (
           <>
-            {!result && (
+            {!result && !manualEntry && (
               <div className="bg-card border border-line rounded-lg p-6 space-y-4">
                 <div>
                   <h2 className="text-lg font-black uppercase text-ink tracking-wide">Augšupielādēt protokolu</h2>
@@ -262,7 +265,20 @@ export default function App() {
                   {loading ? 'Apstrādā...' : 'Izvēlēties failu'}
                 </button>
                 {error && <p className="text-red-400 text-sm">{error}</p>}
+                <div className="text-center pt-2 border-t border-line">
+                  <button
+                    type="button"
+                    onClick={() => setManualEntry(true)}
+                    className="text-accent text-sm font-semibold hover:underline"
+                  >
+                    Nav PDF (rokrakstā rakstīts protokols) - ievadīt ar roku
+                  </button>
+                </div>
               </div>
+            )}
+
+            {manualEntry && (
+              <ManualProtocol lookups={lookups} initialSeasonIndex={seasonIndex} onCancel={handleCancel} />
             )}
 
             {result && (result.status === 'ambiguous' || result.status === 'none') && !creatingNew && (

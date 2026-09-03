@@ -40,6 +40,10 @@ export function createNewGamePreview(args) {
   return window.lachTool.createNewGamePreview(args)
 }
 
+export function createManualGamePreview(args) {
+  return window.lachTool.createManualGamePreview(args)
+}
+
 export function createNewGameSave(args) {
   return window.lachTool.createNewGameSave(args)
 }
