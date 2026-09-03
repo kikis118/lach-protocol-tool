@@ -413,6 +413,23 @@ ipcMain.handle('game:createManualPreview', async (_event, { parsed, homeTeamId, 
   }
 })
 
+// Creates any player named on a manually-entered protocol who doesn't
+// already exist in WP yet, and adds them to the given team's roster -
+// see wp-snippets/create-players.php (lach-hockey-app repo) for the
+// actual WP-side logic. Lets the manual-entry flow skip the tedious
+// "go create each new international player in wp-admin first" step for
+// a brand-new team with no roster yet.
+ipcMain.handle('players:createMissing', async (_event, { teamId, players }) => {
+  const res = await fetch(`${WP_API}/create-players/`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: wpAuthHeader() },
+    body: JSON.stringify({ team_id: teamId, players }),
+  })
+  const body = await res.json()
+  if (!res.ok) throw new Error(body.error || body.message || `HTTP ${res.status}`)
+  return body
+})
+
 ipcMain.handle('game:createNewSave', async (_event, { seasonCombo, homeTeamId, awayTeamId, venueId, kickoff, gameFields, payload }) => {
   const res = await fetch(`${WP_API}/create-finished-game/`, {
     method: 'POST',

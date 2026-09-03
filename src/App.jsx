@@ -224,61 +224,74 @@ export default function App() {
         ) : (
           <>
             {!result && !manualEntry && (
-              <div className="bg-card border border-line rounded-lg p-6 space-y-4">
-                <div>
-                  <h2 className="text-lg font-black uppercase text-ink tracking-wide">Augšupielādēt protokolu</h2>
-                  <p className="text-ink-faint text-sm mt-1">Izvēlies spēles protokola PDF failu no datora.</p>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-stretch">
+                <div className="bg-card border border-line rounded-lg p-6 space-y-4 flex flex-col">
+                  <div>
+                    <h2 className="text-lg font-black uppercase text-ink tracking-wide">Augšupielādēt protokolu</h2>
+                    <p className="text-ink-faint text-sm mt-1">Izvēlies spēles protokola PDF failu no datora.</p>
+                  </div>
+
+                  {lookups && (
+                    <div>
+                      <label className="block text-xs uppercase tracking-wide text-ink-faint font-semibold mb-1">
+                        Sezona / turnīrs
+                      </label>
+                      <select
+                        value={seasonIndex}
+                        onChange={(e) => setSeasonIndex(e.target.value)}
+                        className="w-full bg-surface border border-line-strong rounded-md px-3 py-2 text-ink text-sm focus:outline-none focus:border-accent"
+                      >
+                        <option value="">Visas sezonas</option>
+                        {lookups.seasonCombos.map((s, i) => (
+                          <option key={s.seasonId} value={i}>
+                            {s.seasonName} ({s.tournamentName})
+                          </option>
+                        ))}
+                      </select>
+                      <p className="text-ink-faint text-xs mt-1">
+                        Ja izvēlēta sezona, protokols tiks meklēts tikai tajā - precīzāk un ātrāk.
+                      </p>
+                      <p className="text-ink-faint text-xs mt-1">
+                        Ja neredzi pareizo sezonu vai turnīru, vienkārši atstāj "Visas sezonas".
+                      </p>
+                    </div>
+                  )}
+
+                  <div className="mt-auto">
+                    <button
+                      type="button"
+                      onClick={handlePick}
+                      disabled={loading}
+                      className="bg-accent text-ink font-bold uppercase text-sm tracking-wide px-6 py-3 rounded-lg hover:bg-red-600 hover:scale-[1.02] active:scale-[0.98] transition-all disabled:opacity-50 disabled:hover:scale-100"
+                    >
+                      {loading ? 'Apstrādā...' : 'Izvēlēties failu'}
+                    </button>
+                    {error && <p className="text-red-400 text-sm mt-2">{error}</p>}
+                  </div>
                 </div>
 
-                {lookups && (
+                <div className="bg-card border border-line rounded-lg p-6 space-y-4 flex flex-col">
                   <div>
-                    <label className="block text-xs uppercase tracking-wide text-ink-faint font-semibold mb-1">
-                      Sezona / turnīrs
-                    </label>
-                    <select
-                      value={seasonIndex}
-                      onChange={(e) => setSeasonIndex(e.target.value)}
-                      className="w-full bg-surface border border-line-strong rounded-md px-3 py-2 text-ink text-sm focus:outline-none focus:border-accent"
-                    >
-                      <option value="">Visas sezonas</option>
-                      {lookups.seasonCombos.map((s, i) => (
-                        <option key={s.seasonId} value={i}>
-                          {s.seasonName} ({s.tournamentName})
-                        </option>
-                      ))}
-                    </select>
-                    <p className="text-ink-faint text-xs mt-1">
-                      Ja izvēlēta sezona, protokols tiks meklēts tikai tajā - precīzāk un ātrāk.
-                    </p>
-                    <p className="text-ink-faint text-xs mt-1">
-                      Ja neredzi pareizo sezonu vai turnīru, vienkārši atstāj "Visas sezonas".
+                    <h2 className="text-lg font-black uppercase text-ink tracking-wide">Ievadīt protokolu ar roku</h2>
+                    <p className="text-ink-faint text-sm mt-1">
+                      Rokrakstā aizpildīts protokols (foto/WhatsApp) - nav PDF, ko nolasīt automātiski.
                     </p>
                   </div>
-                )}
-
-                <button
-                  type="button"
-                  onClick={handlePick}
-                  disabled={loading}
-                  className="bg-accent text-ink font-bold uppercase text-sm tracking-wide px-6 py-3 rounded-lg hover:bg-red-600 hover:scale-[1.02] active:scale-[0.98] transition-all disabled:opacity-50 disabled:hover:scale-100"
-                >
-                  {loading ? 'Apstrādā...' : 'Izvēlēties failu'}
-                </button>
-                {error && <p className="text-red-400 text-sm">{error}</p>}
-                <div className="text-center pt-2 border-t border-line">
-                  <button
-                    type="button"
-                    onClick={() => setManualEntry(true)}
-                    className="text-accent text-sm font-semibold hover:underline"
-                  >
-                    Nav PDF (rokrakstā rakstīts protokols) - ievadīt ar roku
-                  </button>
+                  <div className="mt-auto">
+                    <button
+                      type="button"
+                      onClick={() => setManualEntry(true)}
+                      className="bg-accent text-ink font-bold uppercase text-sm tracking-wide px-6 py-3 rounded-lg hover:bg-red-600 hover:scale-[1.02] active:scale-[0.98] transition-all"
+                    >
+                      Ievadīt ar roku
+                    </button>
+                  </div>
                 </div>
               </div>
             )}
 
             {manualEntry && (
-              <ManualProtocol lookups={lookups} initialSeasonIndex={seasonIndex} onCancel={handleCancel} />
+              <ManualProtocol lookups={lookups} initialSeasonIndex={seasonIndex} credentials={credentials} onCancel={handleCancel} />
             )}
 
             {result && (result.status === 'ambiguous' || result.status === 'none') && !creatingNew && (

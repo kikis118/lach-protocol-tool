@@ -44,6 +44,10 @@ export function createManualGamePreview(args) {
   return window.lachTool.createManualGamePreview(args)
 }
 
+export function createMissingPlayers(args) {
+  return window.lachTool.createMissingPlayers(args)
+}
+
 export function createNewGameSave(args) {
   return window.lachTool.createNewGameSave(args)
 }

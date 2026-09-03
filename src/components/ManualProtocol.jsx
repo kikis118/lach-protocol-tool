@@ -1,6 +1,134 @@
-import { useEffect, useState } from 'react'
-import { createManualGamePreview, createNewGameSave, openExternal } from '../api'
-import { BoxScoreTable, GoalsList, PenaltiesList } from './GameSummary'
+import { useEffect, useRef, useState } from 'react'
+import { createManualGamePreview, createMissingPlayers, createNewGameSave, openExternal } from '../api'
+import { PeriodScoresTable, BoxScoreTable, GoalsList, PenaltiesList } from './GameSummary'
+
+// Saved to localStorage (survives an app update/relaunch, unlike plain
+// React state) so filling in a manual protocol isn't lost - restored
+// automatically the next time this screen opens. Both a silent autosave
+// AND an explicit "Saglabāt melnrakstu" button write to the exact same
+// slot (see persistDraft() below) - one slot only, so starting a fresh
+// manual entry after loading a draft just overwrites it on the next save.
+const DRAFT_KEY = 'lachManualProtocolDraft'
+
+function loadDraft() {
+  try {
+    const raw = localStorage.getItem(DRAFT_KEY)
+    return raw ? JSON.parse(raw) : null
+  } catch {
+    return null
+  }
+}
+
+const GROUP_TO_POZ = { Goalies: 'Vārtsargs', Defense: 'Aizsargs', Forwards: 'Uzbrucējs' }
+const POZ_TO_GROUP = { Vārtsargs: 'Goalies', Aizsargs: 'Defense', Uzbrucējs: 'Forwards' }
+const POZ_OPTIONS = ['', 'Vārtsargs', 'Aizsargs', 'Uzbrucējs']
+
+// Gates the Dev Tools panel below to exactly ONE personal WP login
+// ("kikis") - deliberately an exact match, not a loose substring check,
+// so it stays locked for every OTHER person this app gets installed for
+// (everyone else signs in as the shared LHL_admin1 account, or their own
+// distinct one) even if one of those usernames happened to contain
+// similar letters.
+function isDevUser(credentials) {
+  return (credentials?.username || '').trim().toLowerCase() === 'kikis'
+}
+
+// Recovery tool: rebuilds roster rows (jersey + name only - everything
+// needed to repopulate homeRoster/awayRoster) from a plain copy-paste of
+// this SAME screen's own rendered box-score tables (jersey<TAB>name
+// [+ concatenated "nav atpazīts" badge text, no space between them since
+// there's none in the rendered DOM]<TAB>G<TAB>A<TAB>PIM per row, a team-
+// name-only line marking the switch from home to away). One-time-use
+// escape hatch for exactly the "had this filled in, need it back" case -
+// not a general import tool, which is why it's dev-tools-gated rather
+// than a real feature of the form.
+function parsePastedRoster(text, homeTeamName, awayTeamName) {
+  const home = []
+  const away = []
+  let side = 'home'
+  const normalize = (s) => s.trim().replace(/^["']|["']$/g, '').toLowerCase()
+  const homeNorm = normalize(homeTeamName || '')
+  const awayNorm = normalize(awayTeamName || '')
+
+  text.split('\n').forEach((rawLine) => {
+    const line = rawLine.trim()
+    if (!line) return
+    const norm = normalize(line)
+    if (homeNorm && norm === homeNorm) { side = 'home'; return }
+    if (awayNorm && norm === awayNorm) { side = 'away'; return }
+    if (/^#\b/.test(line) || /^Spēlētājs/i.test(line)) return // header row
+
+    let parts = line.split('\t').map((s) => s.trim()).filter((s) => s !== '')
+    if (parts.length !== 5) parts = line.split(/\s{2,}/).map((s) => s.trim()).filter((s) => s !== '')
+    if (parts.length !== 5) return
+
+    const [jerseyRaw, nameRaw] = parts
+    const jersey = /^\d+$/.test(jerseyRaw) ? jerseyRaw : ''
+    const name = nameRaw.replace(/nav atpaz[iī]ts\s*$/i, '').trim()
+    if (!name) return
+    ;(side === 'home' ? home : away).push({ id: uid(), jersey, name, poz: '' })
+  })
+
+  return { home, away }
+}
+
+function DevTools({ credentials, homeTeamName, awayTeamName, onRestoreRoster }) {
+  const [open, setOpen] = useState(false)
+  const [pasteOpen, setPasteOpen] = useState(false)
+  const [text, setText] = useState('')
+  const [result, setResult] = useState(null)
+
+  if (!isDevUser(credentials)) return null
+
+  function handleRestore() {
+    const { home, away } = parsePastedRoster(text, homeTeamName, awayTeamName)
+    onRestoreRoster(home, away)
+    setResult(`Atjaunoti: ${home.length} mājas spēlētāji, ${away.length} viesu spēlētāji.`)
+  }
+
+  return (
+    <div className="bg-card border border-dashed border-line-strong rounded-lg p-3">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="text-ink-faint text-xs font-semibold uppercase tracking-wide hover:text-ink-secondary transition-colors"
+      >
+        🛠 Dev rīki {open ? '▲' : '▼'}
+      </button>
+      {open && (
+        <div className="mt-3 space-y-2">
+          <button
+            type="button"
+            onClick={() => setPasteOpen((o) => !o)}
+            className="text-accent text-xs font-semibold hover:underline"
+          >
+            Ielīmēt sastāvu no kopijas (atjauno abu komandu sarakstus)
+          </button>
+          {pasteOpen && (
+            <div className="space-y-2">
+              <textarea
+                value={text}
+                onChange={(e) => setText(e.target.value)}
+                rows={6}
+                placeholder="Ielīmē abu komandu box-score tabulas (kopētas no šīs pašas lapas)..."
+                className="w-full bg-surface border border-line-strong rounded-md px-3 py-2 text-ink text-xs font-mono focus:outline-none focus:border-accent"
+              />
+              <button
+                type="button"
+                onClick={handleRestore}
+                disabled={!text.trim()}
+                className="bg-card border border-line-strong text-ink-secondary hover:border-accent hover:text-ink font-bold uppercase text-xs tracking-wide px-4 py-2 rounded-lg transition-colors disabled:opacity-50"
+              >
+                Atjaunot sastāvu
+              </button>
+              {result && <p className="text-emerald-400 text-xs font-semibold">{result}</p>}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
 
 // Manual entry for a game whose protocol only exists as a handwritten
 // paper sheet (photographed/WhatsApp'd, not a real digital PDF) - e.g.
@@ -46,50 +174,139 @@ function fromDatetimeLocal(value) {
 
 const EMPTY_LOOKUPS = { seasonCombos: [], teams: [], venues: [], teamDetails: {} }
 
-export default function ManualProtocol({ lookups = EMPTY_LOOKUPS, initialSeasonIndex, onCancel }) {
+export default function ManualProtocol({ lookups = EMPTY_LOOKUPS, initialSeasonIndex, credentials = null, onCancel }) {
   const [error, setError] = useState(null)
+  // Loaded once, at mount - a later save just overwrites the same slot.
+  const [draft] = useState(() => loadDraft())
+  const [draftSavedAt, setDraftSavedAt] = useState(null)
 
-  const [homeTeamId, setHomeTeamId] = useState('')
-  const [awayTeamId, setAwayTeamId] = useState('')
-  const [seasonIndex, setSeasonIndex] = useState(initialSeasonIndex || '')
-  const [venueId, setVenueId] = useState('')
-  const [kickoff, setKickoff] = useState('')
+  const [homeTeamId, setHomeTeamId] = useState(draft?.homeTeamId || '')
+  const [awayTeamId, setAwayTeamId] = useState(draft?.awayTeamId || '')
+  const [seasonIndex, setSeasonIndex] = useState(draft?.seasonIndex ?? (initialSeasonIndex || ''))
+  const [venueId, setVenueId] = useState(draft?.venueId || '')
+  const [kickoff, setKickoff] = useState(draft?.kickoff || '')
 
-  const [homeRoster, setHomeRoster] = useState([])
-  const [awayRoster, setAwayRoster] = useState([])
-  const [homeGoals, setHomeGoals] = useState([])
-  const [awayGoals, setAwayGoals] = useState([])
-  const [homePenalties, setHomePenalties] = useState([])
-  const [awayPenalties, setAwayPenalties] = useState([])
-  const [goalieChanges, setGoalieChanges] = useState([])
+  const [homeRoster, setHomeRoster] = useState(draft?.homeRoster || [])
+  const [awayRoster, setAwayRoster] = useState(draft?.awayRoster || [])
+  const [homeGoals, setHomeGoals] = useState(draft?.homeGoals || [])
+  const [awayGoals, setAwayGoals] = useState(draft?.awayGoals || [])
+  const [homePenalties, setHomePenalties] = useState(draft?.homePenalties || [])
+  const [awayPenalties, setAwayPenalties] = useState(draft?.awayPenalties || [])
+  const [goalieChanges, setGoalieChanges] = useState(draft?.goalieChanges || [])
 
-  // Self-check against the paper protocol's own printed final score,
-  // same role as the real PDF path's officialTotals-vs-derivedTotals
-  // check - optional, since it's just a typo safety net, not itself part
-  // of the data being saved.
-  const [checkHomeFinal, setCheckHomeFinal] = useState('')
-  const [checkAwayFinal, setCheckAwayFinal] = useState('')
+  // Per-period goal counts (the paper protocol's own "Periodu Rezultāti"
+  // footer) - shown on the preview (same PeriodScoresTable the real PDF
+  // path already uses) and doubles as a self-check against the itemized
+  // goals below, same role as the PDF path's officialTotals-vs-
+  // derivedTotals check. Purely a typo safety net / display, like every
+  // other period-score use in this app - never itself written to WP (see
+  // buildNewGamePreview.mjs's own periodScores note).
+  const [periodHome, setPeriodHome] = useState(draft?.periodHome || { p1: '', p2: '', p3: '' })
+  const [periodAway, setPeriodAway] = useState(draft?.periodAway || { p1: '', p2: '', p3: '' })
 
   const [loadingPreview, setLoadingPreview] = useState(false)
   const [preview, setPreview] = useState(null)
   const [saveState, setSaveState] = useState('idle')
   const [saveResult, setSaveResult] = useState(null)
 
+  const [creatingPlayersFor, setCreatingPlayersFor] = useState(null) // 'home' | 'away' | null
+  const [createPlayersResult, setCreatePlayersResult] = useState({ home: null, away: null })
+
   const homeTeamName = lookups.teams.find((t) => t.id === homeTeamId)?.name || ''
   const awayTeamName = lookups.teams.find((t) => t.id === awayTeamId)?.name || ''
 
-  // Prefills each team's roster from its known WP roster the moment it's
-  // picked (jersey + name, editable) - the admin then just deletes the
-  // rows for anyone who didn't dress and adds a row for any guest not on
-  // the WP roster yet, rather than retyping everyone from a blank table.
+// Once a game is actually created in WP it's no longer "in progress" -
+  // persisting (or re-persisting) a draft past that point would make it
+  // reappear the next time manual entry is opened (e.g. for the NEXT
+  // game), showing stale data from this already-saved one.
+  function persistDraft() {
+    if (saveState === 'saved') return false
+    try {
+      const data = { homeTeamId, awayTeamId, seasonIndex, venueId, kickoff, homeRoster, awayRoster, homeGoals, awayGoals, homePenalties, awayPenalties, goalieChanges, periodHome, periodAway }
+      localStorage.setItem(DRAFT_KEY, JSON.stringify(data))
+      return true
+    } catch (err) {
+      setError(`Neizdevās saglabāt melnrakstu: ${err.message}`)
+      return false
+    }
+  }
+  // Explicit button - same underlying save as the silent autosave below,
+  // just with its own visible confirmation for "I'm about to close this,
+  // did it actually save".
+  function saveDraft() {
+    if (persistDraft()) setDraftSavedAt(new Date())
+  }
+  function clearDraft() {
+    try {
+      localStorage.removeItem(DRAFT_KEY)
+    } catch { /* ignore */ }
+  }
   useEffect(() => {
+    if (saveState === 'saved') clearDraft()
+  }, [saveState])
+
+  // Silent autosave, on top of the explicit save-draft button - covers
+  // the case the admin DIDN'T get a chance to click it (app closed/
+  // updated mid-entry). Debounced so typing a name doesn't write to
+  // localStorage on every single keystroke.
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (persistDraft()) setDraftSavedAt(new Date())
+    }, 800)
+    return () => clearTimeout(timer)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    homeTeamId, awayTeamId, seasonIndex, venueId, kickoff,
+    homeRoster, awayRoster, homeGoals, awayGoals, homePenalties, awayPenalties,
+    goalieChanges, periodHome, periodAway,
+  ])
+
+  // Prefills each team's roster from its known WP roster the moment it's
+  // picked (jersey + name + position, editable) - the admin then just
+  // deletes the rows for anyone who didn't dress and adds a row for any
+  // guest not on the WP roster yet, rather than retyping everyone from a
+  // blank table. Skipped exactly once if a restored draft already had
+  // its own (possibly hand-edited) roster for that side - otherwise
+  // restoring a draft would immediately overwrite it with a fresh WP
+  // fetch, silently discarding whatever editing had already been done.
+  const skipHomePrefill = useRef(Boolean(draft?.homeTeamId))
+  const skipAwayPrefill = useRef(Boolean(draft?.awayTeamId))
+  useEffect(() => {
+    if (skipHomePrefill.current) { skipHomePrefill.current = false; return }
     const roster = lookups.teamDetails?.[homeTeamId]?.roster || []
-    setHomeRoster(roster.map((p) => ({ id: uid(), jersey: p.number != null ? String(p.number) : '', name: p.name })))
+    setHomeRoster(roster.map((p) => ({ id: uid(), jersey: p.number != null ? String(p.number) : '', name: p.name, poz: GROUP_TO_POZ[p.group] || '' })))
   }, [homeTeamId]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
+    if (skipAwayPrefill.current) { skipAwayPrefill.current = false; return }
     const roster = lookups.teamDetails?.[awayTeamId]?.roster || []
-    setAwayRoster(roster.map((p) => ({ id: uid(), jersey: p.number != null ? String(p.number) : '', name: p.name })))
+    setAwayRoster(roster.map((p) => ({ id: uid(), jersey: p.number != null ? String(p.number) : '', name: p.name, poz: GROUP_TO_POZ[p.group] || '' })))
   }, [awayTeamId]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function handleCreateMissingPlayers(side) {
+    const teamId = side === 'home' ? homeTeamId : awayTeamId
+    const roster = side === 'home' ? homeRoster : awayRoster
+    if (!teamId) return
+    setCreatingPlayersFor(side)
+    setCreatePlayersResult((r) => ({ ...r, [side]: null }))
+    try {
+      const players = roster
+        .filter((r) => r.name.trim())
+        .map((r) => ({ name: r.name.trim(), jersey: r.jersey.trim() || null, group: POZ_TO_GROUP[r.poz] || null }))
+      const result = await createMissingPlayers({ teamId, players })
+      const created = result.filter((r) => r.created).length
+      const failed = result.filter((r) => r.error)
+      setCreatePlayersResult((r) => ({
+        ...r,
+        [side]: failed.length > 0
+          ? `Izveidoti ${created} jauni spēlētāji, bet ${failed.length} neizdevās: ${failed.map((f) => f.name).join(', ')}`
+          : `Gatavs - izveidoti ${created} jauni spēlētāji (pārējie jau eksistēja WP).`,
+      }))
+    } catch (err) {
+      setCreatePlayersResult((r) => ({ ...r, [side]: `Neizdevās: ${err.message}` }))
+    } finally {
+      setCreatingPlayersFor(null)
+    }
+  }
 
   const canPreview = homeTeamId && awayTeamId && homeTeamId !== awayTeamId && seasonIndex !== '' && venueId && kickoff
 
@@ -127,9 +344,15 @@ export default function ManualProtocol({ lookups = EMPTY_LOOKUPS, initialSeasonI
       .map((r) => ({ time: r.time.trim(), goalieAJersey: r.homeJersey.trim() || null, goalieBJersey: r.awayJersey.trim() || null }))
 
     const derivedTotals = { A: goals.filter((g) => g.team === 'A').length, B: goals.filter((g) => g.team === 'B').length }
+    // Only computed once all 3 periods for that side are filled in - a
+    // partial period entry shouldn't trigger a possibly-wrong mismatch
+    // warning.
+    const periodTotal = (p) => (p.p1.trim() && p.p2.trim() && p.p3.trim() ? Number(p.p1) + Number(p.p2) + Number(p.p3) : null)
+    const homePeriodTotal = periodTotal(periodHome)
+    const awayPeriodTotal = periodTotal(periodAway)
     const officialTotals = {}
-    if (checkHomeFinal.trim()) officialTotals.A = Number(checkHomeFinal)
-    if (checkAwayFinal.trim()) officialTotals.B = Number(checkAwayFinal)
+    if (homePeriodTotal !== null) officialTotals.A = homePeriodTotal
+    if (awayPeriodTotal !== null) officialTotals.B = awayPeriodTotal
     const goalCountMatches =
       'A' in officialTotals && 'B' in officialTotals
         ? officialTotals.A === derivedTotals.A && officialTotals.B === derivedTotals.B
@@ -151,6 +374,19 @@ export default function ManualProtocol({ lookups = EMPTY_LOOKUPS, initialSeasonI
     try {
       const parsed = buildParsed()
       const result = await createManualGamePreview({ parsed, homeTeamId, awayTeamId, aIsHome: true })
+      // Attached client-side (never sent to/read from WP - see this
+      // component's own periodHome/periodAway comment) purely so the
+      // preview can reuse PeriodScoresTable, same display the real PDF
+      // path already gets. `final` comes from the actual computed score,
+      // not the typed periods, so it can never disagree with the box
+      // score above it even if a period field has a typo.
+      const anyPeriodEntered = [periodHome, periodAway].some((p) => p.p1.trim() || p.p2.trim() || p.p3.trim())
+      if (anyPeriodEntered) {
+        result.preview.periodScores = {
+          home: { p1: periodHome.p1 || undefined, p2: periodHome.p2 || undefined, p3: periodHome.p3 || undefined, final: result.preview.finalScore.home },
+          away: { p1: periodAway.p1 || undefined, p2: periodAway.p2 || undefined, p3: periodAway.p3 || undefined, final: result.preview.finalScore.away },
+        }
+      }
       setPreview(result)
     } catch (err) {
       setError(err.message)
@@ -181,9 +417,32 @@ export default function ManualProtocol({ lookups = EMPTY_LOOKUPS, initialSeasonI
 
   return (
     <div className="space-y-4">
-      <div className="bg-card border border-line rounded-lg p-4">
+      <div className="bg-card border border-line rounded-lg p-4 flex flex-wrap items-center justify-between gap-3">
         <h2 className="text-lg font-black uppercase text-ink tracking-wide">Ievadīt protokolu ar roku</h2>
+        {!preview && (
+          <div className="flex items-center gap-2">
+            {draftSavedAt && (
+              <span className="text-ink-faint text-xs">
+                Melnraksts saglabāts {draftSavedAt.toLocaleTimeString('lv-LV')}
+              </span>
+            )}
+            <button
+              type="button"
+              onClick={saveDraft}
+              className="bg-card border border-line-strong text-ink-secondary hover:border-accent hover:text-ink font-semibold uppercase text-xs tracking-wide px-3 py-1.5 rounded-md transition-colors"
+            >
+              Saglabāt melnrakstu
+            </button>
+          </div>
+        )}
       </div>
+
+      <DevTools
+        credentials={credentials}
+        homeTeamName={homeTeamName}
+        awayTeamName={awayTeamName}
+        onRestoreRoster={(home, away) => { setHomeRoster(home); setAwayRoster(away) }}
+      />
 
       {!preview && (
         <>
@@ -219,7 +478,7 @@ export default function ManualProtocol({ lookups = EMPTY_LOOKUPS, initialSeasonI
               </select>
             </Field>
 
-            <Field label="Vieta">
+            <Field label="Arēna">
               <select
                 value={venueId}
                 onChange={(e) => setVenueId(e.target.value)}
@@ -231,13 +490,6 @@ export default function ManualProtocol({ lookups = EMPTY_LOOKUPS, initialSeasonI
                 ))}
               </select>
             </Field>
-            <button
-              type="button"
-              onClick={() => openExternal('https://lach.lv/wp-admin/post-new.php?post_type=sl_venue')}
-              className="text-accent text-xs font-semibold hover:underline -mt-2"
-            >
-              Vietas nav sarakstā? Izveidot jaunu vietu WP-Admin
-            </button>
 
             <Field label="Datums un laiks">
               <input
@@ -259,6 +511,9 @@ export default function ManualProtocol({ lookups = EMPTY_LOOKUPS, initialSeasonI
               setGoals={setHomeGoals}
               penalties={homePenalties}
               setPenalties={setHomePenalties}
+              onCreateMissingPlayers={homeTeamId ? () => handleCreateMissingPlayers('home') : null}
+              creatingPlayers={creatingPlayersFor === 'home'}
+              createPlayersMessage={createPlayersResult.home}
             />
             <TeamProtocolPanel
               label="B komanda (viesi)"
@@ -269,34 +524,22 @@ export default function ManualProtocol({ lookups = EMPTY_LOOKUPS, initialSeasonI
               setGoals={setAwayGoals}
               penalties={awayPenalties}
               setPenalties={setAwayPenalties}
+              onCreateMissingPlayers={awayTeamId ? () => handleCreateMissingPlayers('away') : null}
+              creatingPlayers={creatingPlayersFor === 'away'}
+              createPlayersMessage={createPlayersResult.away}
             />
           </div>
 
           <GoalieChangesPanel rows={goalieChanges} setRows={setGoalieChanges} />
 
-          <div className="bg-card border border-line rounded-lg p-4 space-y-3">
-            <h3 className="text-ink-faint text-xs uppercase tracking-wide font-semibold">
-              Pašpārbaude (nav obligāti) - protokola apakšā izdrukātais gala rezultāts
-            </h3>
-            <div className="grid grid-cols-2 gap-4 max-w-sm">
-              <Field label={`Vārti kopā (${homeTeamName || 'mājas'})`}>
-                <input
-                  type="number"
-                  value={checkHomeFinal}
-                  onChange={(e) => setCheckHomeFinal(e.target.value)}
-                  className="w-full bg-surface border border-line-strong rounded-md px-3 py-2 text-ink text-sm focus:outline-none focus:border-accent"
-                />
-              </Field>
-              <Field label={`Vārti kopā (${awayTeamName || 'viesi'})`}>
-                <input
-                  type="number"
-                  value={checkAwayFinal}
-                  onChange={(e) => setCheckAwayFinal(e.target.value)}
-                  className="w-full bg-surface border border-line-strong rounded-md px-3 py-2 text-ink text-sm focus:outline-none focus:border-accent"
-                />
-              </Field>
-            </div>
-          </div>
+          <PeriodScoresEditor
+            homeTeamName={homeTeamName}
+            awayTeamName={awayTeamName}
+            periodHome={periodHome}
+            setPeriodHome={setPeriodHome}
+            periodAway={periodAway}
+            setPeriodAway={setPeriodAway}
+          />
 
           <div className="flex flex-wrap items-center gap-3">
             <button
@@ -333,7 +576,7 @@ export default function ManualProtocol({ lookups = EMPTY_LOOKUPS, initialSeasonI
 
           {preview.goalCountMatchesProtocol === false && (
             <div className="bg-red-950/40 border border-red-600/40 text-red-300 text-sm rounded-lg px-4 py-3">
-              Pašpārbaude neatbilst: itemizēto vārtu skaits nesakrīt ar ievadīto gala rezultātu. Pārbaudi rūpīgi.
+              Pašpārbaude neatbilst: itemizēto vārtu skaits nesakrīt ar ievadītajiem periodu rezultātiem. Pārbaudi rūpīgi.
             </div>
           )}
           {preview.notes.length > 0 && (
@@ -342,6 +585,10 @@ export default function ManualProtocol({ lookups = EMPTY_LOOKUPS, initialSeasonI
                 <p key={i}>&bull; {n}</p>
               ))}
             </div>
+          )}
+
+          {preview.preview.periodScores && (
+            <PeriodScoresTable periodScores={preview.preview.periodScores} homeTeam={preview.homeTeam.name} awayTeam={preview.awayTeam.name} />
           )}
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -393,7 +640,10 @@ export default function ManualProtocol({ lookups = EMPTY_LOOKUPS, initialSeasonI
 // (goals) + Sodi (penalties) sub-tables, matching the paper's own
 // "A komanda" / "B komanda" sections (each printed with its own roster,
 // goals and penalties - never split across a shared table).
-function TeamProtocolPanel({ label, teamName, roster, setRoster, goals, setGoals, penalties, setPenalties }) {
+function TeamProtocolPanel({
+  label, teamName, roster, setRoster, goals, setGoals, penalties, setPenalties,
+  onCreateMissingPlayers, creatingPlayers, createPlayersMessage,
+}) {
   return (
     <div className="bg-card border border-line rounded-lg p-4 space-y-4">
       <h3 className="text-accent font-bold text-sm uppercase tracking-wide">
@@ -402,6 +652,19 @@ function TeamProtocolPanel({ label, teamName, roster, setRoster, goals, setGoals
       </h3>
 
       <RosterEditor roster={roster} setRoster={setRoster} />
+      {onCreateMissingPlayers && (
+        <div>
+          <button
+            type="button"
+            onClick={onCreateMissingPlayers}
+            disabled={creatingPlayers}
+            className="text-accent text-xs font-semibold hover:underline disabled:opacity-50"
+          >
+            {creatingPlayers ? 'Izveido...' : '+ Izveidot iztrūkstošos spēlētājus WP'}
+          </button>
+          {createPlayersMessage && <p className="text-ink-faint text-xs mt-1">{createPlayersMessage}</p>}
+        </div>
+      )}
       <GoalsEditor rows={goals} setRows={setGoals} />
       <PenaltiesEditor rows={penalties} setRows={setPenalties} />
     </div>
@@ -416,12 +679,12 @@ function RosterEditor({ roster, setRoster }) {
     setRoster(roster.filter((r) => r.id !== id))
   }
   function addRow() {
-    setRoster([...roster, { id: uid(), jersey: '', name: '' }])
+    setRoster([...roster, { id: uid(), jersey: '', name: '', poz: '' }])
   }
 
   return (
     <div>
-      <p className="text-xs uppercase tracking-wide text-ink-faint font-semibold mb-1">Sastāvs (Nr, Vārds, Uzvārds)</p>
+      <p className="text-xs uppercase tracking-wide text-ink-faint font-semibold mb-1">Sastāvs (Nr, Vārds, Uzvārds, Poz.)</p>
       <div className="space-y-1.5">
         {roster.map((r) => (
           <div key={r.id} className="flex items-center gap-2">
@@ -439,6 +702,16 @@ function RosterEditor({ roster, setRoster }) {
               onChange={(e) => updateRow(r.id, 'name', e.target.value)}
               className="flex-1 bg-surface border border-line-strong rounded-md px-2 py-1.5 text-ink text-sm focus:outline-none focus:border-accent"
             />
+            <select
+              value={r.poz || ''}
+              onChange={(e) => updateRow(r.id, 'poz', e.target.value)}
+              title="Pozīcija (nosaka Vārtsargs/Aizsargs/Uzbrucējs statistikā)"
+              className="w-28 bg-surface border border-line-strong rounded-md px-2 py-1.5 text-ink text-sm focus:outline-none focus:border-accent"
+            >
+              {POZ_OPTIONS.map((p) => (
+                <option key={p} value={p}>{p || 'Poz.'}</option>
+              ))}
+            </select>
             <RemoveRowButton onClick={() => removeRow(r.id)} />
           </div>
         ))}
@@ -575,6 +848,55 @@ function PenaltiesEditor({ rows, setRows }) {
       </div>
       <AddRowButton onClick={addRow} label="+ Pievienot sodu" />
     </div>
+  )
+}
+
+// The paper protocol's own "Periodu Rezultāti" footer - per-period goal
+// counts for both teams. Purely informational/self-check (see this
+// component's own periodHome/periodAway state comment) - never itself
+// written to WP, just shown back on the preview via PeriodScoresTable
+// and used to catch a transcription slip against the itemized goals.
+function PeriodScoresEditor({ homeTeamName, awayTeamName, periodHome, setPeriodHome, periodAway, setPeriodAway }) {
+  return (
+    <div className="bg-card border border-line rounded-lg p-4 space-y-3">
+      <h3 className="text-ink-faint text-xs uppercase tracking-wide font-semibold">
+        Periodu rezultāti (nav obligāti) - protokola apakšā izdrukātie rezultāti
+      </h3>
+      <div className="overflow-x-auto">
+        <table className="text-sm text-ink-secondary">
+          <thead>
+            <tr className="text-xs uppercase text-ink-faint">
+              <th className="pr-4 text-left font-semibold"></th>
+              <th className="px-2 font-semibold text-center">1.</th>
+              <th className="px-2 font-semibold text-center">2.</th>
+              <th className="px-2 font-semibold text-center">3.</th>
+            </tr>
+          </thead>
+          <tbody>
+            <PeriodRow label={homeTeamName || 'Mājas'} period={periodHome} setPeriod={setPeriodHome} />
+            <PeriodRow label={awayTeamName || 'Viesi'} period={periodAway} setPeriod={setPeriodAway} />
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
+function PeriodRow({ label, period, setPeriod }) {
+  return (
+    <tr>
+      <td className="pr-4 font-medium text-ink whitespace-nowrap">{label}</td>
+      {['p1', 'p2', 'p3'].map((key) => (
+        <td key={key} className="px-2 py-1">
+          <input
+            type="number"
+            value={period[key]}
+            onChange={(e) => setPeriod({ ...period, [key]: e.target.value })}
+            className="w-16 bg-surface border border-line-strong rounded-md px-2 py-1.5 text-ink text-sm text-center focus:outline-none focus:border-accent"
+          />
+        </td>
+      ))}
+    </tr>
   )
 }
 
