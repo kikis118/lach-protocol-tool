@@ -7,6 +7,7 @@ import ManualProtocol from './components/ManualProtocol'
 import Setup from './components/Setup'
 import UpdateBadge from './components/UpdateBadge'
 import { listHistory, removeHistoryEntry, newHistoryId } from './protocolHistory'
+import sampleProtocolImg from './assets/sample-protocol-preview.png'
 
 // How long a saved login is trusted without being re-checked against
 // WordPress - like a "stay signed in" session rather than a real login
@@ -43,6 +44,7 @@ export default function App() {
 
   const [lookups, setLookups] = useState(null)
   const [seasonIndex, setSeasonIndex] = useState('') // '' = visas sezonas (no scoping)
+  const [showSampleProtocol, setShowSampleProtocol] = useState(false)
 
   // In-app confirm modal, replacing window.confirm() everywhere in this
   // file - a real bug, not just cosmetic: Electron/Chromium has a known
@@ -329,6 +331,13 @@ export default function App() {
                     <p className="text-ink-faint text-sm mt-1">
                       Tikai PDF formātā - oficiālais elektroniskais protokols, ko sistēma automātiski nolasa un sasaista ar spēli.
                     </p>
+                    <button
+                      type="button"
+                      onClick={() => setShowSampleProtocol(true)}
+                      className="text-accent text-xs font-bold uppercase tracking-wide mt-2 hover:underline"
+                    >
+                      Skatīt parauga protokolu →
+                    </button>
                   </div>
 
                   {lookups && (
@@ -504,6 +513,41 @@ export default function App() {
       {confirmState && (
         <ConfirmModal message={confirmState.message} onYes={() => answerConfirm(true)} onNo={() => answerConfirm(false)} />
       )}
+      {showSampleProtocol && <SampleProtocolModal onClose={() => setShowSampleProtocol(false)} />}
+    </div>
+  )
+}
+
+function SampleProtocolModal({ onClose }) {
+  return (
+    <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4" onClick={onClose}>
+      <div
+        className="bg-card border border-line-strong rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] flex flex-col"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="p-6 pb-4 space-y-2 shrink-0">
+          <h2 className="text-lg font-black uppercase text-ink tracking-wide">Parauga protokols</h2>
+          <p className="text-ink-secondary text-sm">
+            Šādi izskatās oficiālais LHL elektroniskais protokols, ko šis rīks prot automātiski nolasīt no PDF.
+          </p>
+          <p className="text-red-400 text-sm font-bold">
+            Rokrakstā aizpildīts vai nofotografēts protokols NEDARBOSIES - sistēma to nevar nolasīt.
+            Der tikai PDF fails tieši šādā formātā. Ja protokols ir rokrakstā, izmanto "Ievadīt ar roku".
+          </p>
+        </div>
+        <div className="overflow-auto px-6 flex-1 bg-inset">
+          <img src={sampleProtocolImg} alt="Parauga protokols" className="w-full h-auto rounded border border-line" />
+        </div>
+        <div className="p-6 pt-4 shrink-0">
+          <button
+            type="button"
+            onClick={onClose}
+            className="w-full bg-accent text-ink font-bold uppercase text-sm tracking-wide px-6 py-3 rounded-lg hover:bg-red-600 transition-colors"
+          >
+            Aizvērt
+          </button>
+        </div>
+      </div>
     </div>
   )
 }
