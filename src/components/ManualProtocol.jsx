@@ -512,11 +512,24 @@ const ManualProtocol = forwardRef(function ManualProtocol(
   async function handleCreate() {
     setSaveState('saving')
     try {
+      // Only included once all 3 periods are filled for a side (see
+      // buildParsed's own periodTotal) - a half-filled period breakdown
+      // would be actively wrong to publish, not just incomplete.
+      // Previously this data never left the preview screen at all (the
+      // WP field it belongs in, _sl_scores_home/away, was either never
+      // touched or left as a hardcoded-empty placeholder) - confirmed
+      // missing live on game 1216's own period breakdown.
+      const periodComplete = (p) => Boolean(p.p1.trim() && p.p2.trim() && p.p3.trim())
+      const period_scores = (periodComplete(periodHome) || periodComplete(periodAway))
+        ? { home: periodComplete(periodHome) ? periodHome : {}, away: periodComplete(periodAway) ? periodAway : {} }
+        : null
+      const payload = period_scores ? { ...preview.payload, period_scores } : preview.payload
+
       const result = mode === 'existing'
         ? await finishScheduledGame({
             gameId: existingGameId,
             gameFields: preview.gameFields,
-            payload: preview.payload,
+            payload,
           })
         : await createNewGameSave({
             seasonCombo: lookups.seasonCombos[seasonIndex],
@@ -525,7 +538,7 @@ const ManualProtocol = forwardRef(function ManualProtocol(
             venueId,
             kickoff: fromDatetimeLocal(kickoff),
             gameFields: preview.gameFields,
-            payload: preview.payload,
+            payload,
           })
       setSaveState('saved')
       setSaveResult(result)
