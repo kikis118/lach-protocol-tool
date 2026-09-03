@@ -17,6 +17,22 @@ function isDevUser(credentials) {
   return (credentials?.username || '').trim().toLowerCase() === 'kikis'
 }
 
+// A real PDF protocol export always prints a zero-padded "MM:SS" clock
+// time (confirmed on every sample seen this project) - a handwritten
+// protocol typed in by hand has no such guarantee ("4:50" instead of
+// "04:50"), which would otherwise ship inconsistent-looking data next
+// to years of PDF-sourced games. Only pads the minutes side - "4:50"
+// and "04:50" mean the same clock time either way, this just matches
+// the established on-record convention. Leaves anything that isn't a
+// plain M:SS/MM:SS shape untouched rather than guessing.
+function normalizeClock(raw) {
+  const trimmed = (raw || '').trim()
+  if (!trimmed) return null
+  const m = /^(\d{1,3}):(\d{2})$/.exec(trimmed)
+  if (!m) return trimmed
+  return `${m[1].padStart(2, '0')}:${m[2]}`
+}
+
 // Recovery tool, legacy/fallback form: rebuilds roster rows (jersey +
 // name only) from a plain copy-paste of this screen's own rendered box-
 // score tables (jersey<TAB>name [+ concatenated "nav atpazīts" badge
@@ -454,7 +470,7 @@ const ManualProtocol = forwardRef(function ManualProtocol(
         .map((g) => ({
           team: side,
           seq: null,
-          time: g.situation === 'PS' ? null : g.time.trim() || null,
+          time: g.situation === 'PS' ? null : normalizeClock(g.time),
           scorerJersey: g.scorerJersey.trim(),
           assist1Jersey: g.assist1Jersey.trim() || null,
           assist2Jersey: g.assist2Jersey.trim() || null,
@@ -469,8 +485,8 @@ const ManualProtocol = forwardRef(function ManualProtocol(
           jersey: p.jersey.trim() || null,
           minutes: p.minutes.trim() ? Number(p.minutes) : null,
           infraction: p.infraction.trim(),
-          slStart: p.slStart.trim() || null,
-          blEnd: p.blEnd.trim() || null,
+          slStart: normalizeClock(p.slStart),
+          blEnd: normalizeClock(p.blEnd),
         }))
 
     const goals = [...toGoals(homeGoals, 'A'), ...toGoals(awayGoals, 'B')]
