@@ -926,6 +926,15 @@ const ManualProtocol = forwardRef(function ManualProtocol(
               </span>
             )}
             {saveState === 'failed' && <span className="text-red-400 text-sm font-semibold">Neizdevās: {saveResult}</span>}
+            {saveState === 'saved' && (
+              <button
+                type="button"
+                onClick={() => openExternal(`https://lach.lv/games/${saveResult.game_id}`)}
+                className="ml-auto bg-emerald-600 text-white font-bold uppercase text-sm tracking-wide px-6 py-3 rounded-lg hover:bg-emerald-500 transition-colors"
+              >
+                Skatīt spēli mājaslapā
+              </button>
+            )}
           </div>
         </>
       )}
