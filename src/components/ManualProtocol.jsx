@@ -343,15 +343,22 @@ const ManualProtocol = forwardRef(function ManualProtocol(
   // instant something changes (read by the header's "leave this screen?"
   // confirm via the imperative handle below, so it can skip the prompt
   // entirely once the debounce has already caught up) and back to false
-  // the moment persistDraft() actually succeeds - skipped on the very
-  // first run (mount/draft-restore), which isn't a real change.
+  // the moment persistDraft() actually succeeds.
+  //
+  // The very first run (mount/draft-restore) skips persisting ENTIRELY,
+  // not just the dirty flag - real bug found: it used to still schedule
+  // a persistDraft() call on mount, which for a resumed "Publicēts"
+  // entry would write status:'draft' (since saveState starts 'idle' on
+  // every fresh mount) purely from OPENING it, even with zero actual
+  // edits - a published entry silently downgraded to Melnraksts just by
+  // clicking into it and back out.
   const isFirstAutosaveRun = useRef(true)
   useEffect(() => {
     if (isFirstAutosaveRun.current) {
       isFirstAutosaveRun.current = false
-    } else {
-      dirtyRef.current = true
+      return
     }
+    dirtyRef.current = true
     const timer = setTimeout(() => {
       if (persistDraft()) setDraftSavedAt(new Date())
     }, 800)
