@@ -183,10 +183,6 @@ export default function ManualProtocol({ lookups = EMPTY_LOOKUPS, initialSeasonI
     <div className="space-y-4">
       <div className="bg-card border border-line rounded-lg p-4">
         <h2 className="text-lg font-black uppercase text-ink tracking-wide">Ievadīt protokolu ar roku</h2>
-        <p className="text-ink-faint text-sm mt-1">
-          Priekš rokrakstā aizpildītiem protokoliem (piem. foto/WhatsApp bildes), kur nav PDF, ko nolasīt automātiski.
-          Aizpildi zemāk tieši tos pašus laukus, kas ir uz papīra protokola.
-        </p>
       </div>
 
       {!preview && (
