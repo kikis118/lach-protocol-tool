@@ -218,8 +218,20 @@ function kickoffToInputValue(kickoff) {
 
 const EMPTY_LOOKUPS = { seasonCombos: [], teams: [], venues: [], teamDetails: {}, games: [] }
 
+// A fresh/tournament-only team's roster (e.g. an EAHF international
+// squad, just-created this session) is small - safe to prefill without
+// asking. An established club that's played real LHL seasons (e.g. HK
+// Jenoti) accumulates a much bigger WP roster over time, most of whom
+// never touch a specific one-off tournament - loading all of it every
+// time floods the form with players who need deleting one by one
+// before the admin can even start. No single number is "correct", but
+// a real EAHF-format roster tops out around 20 dressed players, so
+// anything past that is assumed to be an established club's full
+// historical roster rather than this game's actual lineup.
+const LARGE_ROSTER_THRESHOLD = 20
+
 const ManualProtocol = forwardRef(function ManualProtocol(
-  { lookups = EMPTY_LOOKUPS, initialSeasonIndex, credentials = null, historyId, initialData = null, onCancel },
+  { lookups = EMPTY_LOOKUPS, initialSeasonIndex, credentials = null, historyId, initialData = null, onCancel, askConfirm },
   ref,
 ) {
   const [error, setError] = useState(null)
@@ -394,17 +406,36 @@ const ManualProtocol = forwardRef(function ManualProtocol(
   // its own (possibly hand-edited) roster for that side - otherwise
   // restoring a draft would immediately overwrite it with a fresh WP
   // fetch, silently discarding whatever editing had already been done.
+  const toRosterRows = (roster) =>
+    roster.map((p) => ({ id: uid(), jersey: p.number != null ? String(p.number) : '', name: p.name, poz: GROUP_TO_POZ[p.group] || '' }))
+
+  // A large roster asks first (see LARGE_ROSTER_THRESHOLD) - "Nē" starts
+  // that side empty instead of silently doing nothing, since the admin
+  // still needs a roster to build, just not the club's entire history.
+  // Falls back to loading unconditionally if no askConfirm was passed in
+  // (defensive only - App.jsx always provides one).
+  async function confirmAndLoadRoster(roster, setRoster, teamName) {
+    if (roster.length > LARGE_ROSTER_THRESHOLD && askConfirm) {
+      const ok = await askConfirm(
+        `${teamName || 'Šai komandai'} ir zināms sastāvs ar ${roster.length} spēlētājiem (visticamāk no vairākām sezonām) - ielādēt visus? "Nē" sāk ar tukšu sastāvu.`,
+      )
+      setRoster(ok ? toRosterRows(roster) : [])
+      return
+    }
+    setRoster(toRosterRows(roster))
+  }
+
   const skipHomePrefill = useRef(Boolean(draft?.homeTeamId))
   const skipAwayPrefill = useRef(Boolean(draft?.awayTeamId))
   useEffect(() => {
     if (skipHomePrefill.current) { skipHomePrefill.current = false; return }
     const roster = lookups.teamDetails?.[homeTeamId]?.roster || []
-    setHomeRoster(roster.map((p) => ({ id: uid(), jersey: p.number != null ? String(p.number) : '', name: p.name, poz: GROUP_TO_POZ[p.group] || '' })))
+    confirmAndLoadRoster(roster, setHomeRoster, homeTeamName)
   }, [homeTeamId]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (skipAwayPrefill.current) { skipAwayPrefill.current = false; return }
     const roster = lookups.teamDetails?.[awayTeamId]?.roster || []
-    setAwayRoster(roster.map((p) => ({ id: uid(), jersey: p.number != null ? String(p.number) : '', name: p.name, poz: GROUP_TO_POZ[p.group] || '' })))
+    confirmAndLoadRoster(roster, setAwayRoster, awayTeamName)
   }, [awayTeamId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Called automatically as part of handlePreview (below) - not a
@@ -450,9 +481,8 @@ const ManualProtocol = forwardRef(function ManualProtocol(
     try {
       const fresh = await getLookups()
       const roster = fresh.teamDetails?.[teamId]?.roster || []
-      const rows = roster.map((p) => ({ id: uid(), jersey: p.number != null ? String(p.number) : '', name: p.name, poz: GROUP_TO_POZ[p.group] || '' }))
-      if (side === 'home') setHomeRoster(rows)
-      else setAwayRoster(rows)
+      const teamName = side === 'home' ? homeTeamName : awayTeamName
+      await confirmAndLoadRoster(roster, side === 'home' ? setHomeRoster : setAwayRoster, teamName)
     } catch (err) {
       setError(`Neizdevās ielādēt sastāvu: ${err.message}`)
     } finally {

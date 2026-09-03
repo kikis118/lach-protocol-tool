@@ -465,6 +465,7 @@ export default function App() {
                 historyId={activeHistoryId}
                 initialData={activeHistoryData}
                 onCancel={handleCancel}
+                askConfirm={askConfirm}
               />
             )}
 
