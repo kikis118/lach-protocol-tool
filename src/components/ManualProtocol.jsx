@@ -520,7 +520,11 @@ const ManualProtocol = forwardRef(function ManualProtocol(
             scorerJersey: g.scorerJersey.trim(),
             assist1Jersey: g.assist1Jersey.trim() || null,
             assist2Jersey: g.assist2Jersey.trim() || null,
-            situation: isShootout ? 'PS' : g.situation === 'PS' ? null : g.situation || null,
+            // "PS" stays on the goal either way - it's still true the
+            // goal was a penalty shot, isShootout is just which KIND
+            // (real shootout vs an in-game one) - the site badges it
+            // either way (see GameDetail.jsx's SITUATION_BADGE).
+            situation: g.situation || null,
             isShootout,
           }
         })
