@@ -494,19 +494,36 @@ const ManualProtocol = forwardRef(function ManualProtocol(
 
   function buildParsed() {
     const toPlayers = (roster) => roster.filter((r) => r.name.trim()).map((r) => ({ name: r.name.trim(), jersey: r.jersey.trim() || null }))
+    // "PS" is genuinely overloaded in hockey scoring: an official LHL
+    // PDF export only ever uses it for a true shootout-deciding goal
+    // (game tied after P3, no in-game clock time - see
+    // parseProtocol.mjs's own comment on this), but a handwritten
+    // protocol has used the same code for an ordinary IN-GAME penalty
+    // shot awarded for a foul, which DOES have a real clock time
+    // (confirmed live: games 1228/1235, both wrongly recorded as
+    // shootout-decided - "no shootout, just a tripping penalty that
+    // gave a penalty shot" - because this code used to always null the
+    // time and flag isShootout the moment "PS" was picked, with no way
+    // to tell the two cases apart). The real signal is whether a clock
+    // time actually got typed - a true shootout goal never has one, an
+    // in-game penalty shot always does.
     const toGoals = (rows, side) =>
       rows
         .filter((g) => g.scorerJersey.trim())
-        .map((g) => ({
-          team: side,
-          seq: null,
-          time: g.situation === 'PS' ? null : normalizeClock(g.time),
-          scorerJersey: g.scorerJersey.trim(),
-          assist1Jersey: g.assist1Jersey.trim() || null,
-          assist2Jersey: g.assist2Jersey.trim() || null,
-          situation: g.situation || null,
-          isShootout: g.situation === 'PS',
-        }))
+        .map((g) => {
+          const clock = normalizeClock(g.time)
+          const isShootout = g.situation === 'PS' && !clock
+          return {
+            team: side,
+            seq: null,
+            time: isShootout ? null : clock,
+            scorerJersey: g.scorerJersey.trim(),
+            assist1Jersey: g.assist1Jersey.trim() || null,
+            assist2Jersey: g.assist2Jersey.trim() || null,
+            situation: isShootout ? 'PS' : g.situation === 'PS' ? null : g.situation || null,
+            isShootout,
+          }
+        })
     const toPenalties = (rows, side) =>
       rows
         .filter((p) => p.infraction.trim())
@@ -1049,11 +1066,14 @@ function GoalsEditor({ rows, setRows }) {
             <input
               type="text"
               placeholder="Laiks"
-              title="Laiks (M:SS)"
+              title={
+                r.situation === 'PS'
+                  ? 'Laiks (M:SS) - atstāj tukšu, ja šis ir īsts pēcspēles bullis (bez laika); ieraksti laiku, ja tas ir soda metiens spēles laikā'
+                  : 'Laiks (M:SS)'
+              }
               value={r.time}
               onChange={(e) => updateRow(r.id, 'time', e.target.value)}
-              disabled={r.situation === 'PS'}
-              className="w-16 bg-surface border border-line-strong rounded-md px-2 py-1.5 text-ink text-sm focus:outline-none focus:border-accent disabled:opacity-40"
+              className="w-16 bg-surface border border-line-strong rounded-md px-2 py-1.5 text-ink text-sm focus:outline-none focus:border-accent"
             />
             <input
               type="text"
