@@ -123,3 +123,11 @@ export function updateTeamName(args) {
 export function updatePlayerName(args) {
   return window.lachTool.updatePlayerName(args)
 }
+
+export function getHelperPin() {
+  return window.lachTool.getHelperPin()
+}
+
+export function setHelperPin(pin) {
+  return window.lachTool.setHelperPin(pin)
+}

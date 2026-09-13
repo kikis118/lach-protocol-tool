@@ -40,7 +40,7 @@ function readCredentials() {
   try {
     return JSON.parse(fs.readFileSync(credentialsPath(), 'utf8'))
   } catch {
-    return { username: '', appPassword: '' }
+    return { mode: 'password', username: '', appPassword: '', pin: '' }
   }
 }
 
@@ -48,10 +48,23 @@ function writeCredentials(creds) {
   fs.writeFileSync(credentialsPath(), JSON.stringify(creds), 'utf8')
 }
 
-function wpAuthHeader() {
-  const { username, appPassword } = readCredentials()
-  if (!username || !appPassword) throw new Error('WordPress credentials not set - open Iestatījumi to add them')
-  return `Basic ${Buffer.from(`${username}:${appPassword}`).toString('base64')}`
+// Two credential modes, same as admin-app's api.js on the mobile side:
+// 'password' is the original per-installer Application Password (Basic
+// Auth, WordPress's own multi-user auth); 'pin' is the newer shared helper
+// PIN (see lach-helper-pin-auth.php in lach-hockey-app) - a short, easily
+// re-shareable secret that WordPress translates server-side into the same
+// shared LHL_admin1 identity, without this app ever holding the real
+// Application Password. Returns a headers OBJECT (not a single string) to
+// spread into a fetch() call, since the two modes use different header
+// names entirely.
+function wpAuthHeaders() {
+  const creds = readCredentials()
+  if (creds.mode === 'pin') {
+    if (!creds.pin) throw new Error('PIN nav iestatīts - atver Iestatījumi')
+    return { 'X-Lach-Helper-Pin': creds.pin }
+  }
+  if (!creds.username || !creds.appPassword) throw new Error('WordPress credentials not set - open Iestatījumi to add them')
+  return { Authorization: `Basic ${Buffer.from(`${creds.username}:${creds.appPassword}`).toString('base64')}` }
 }
 
 async function fetchFullData() {
@@ -192,13 +205,21 @@ ipcMain.handle('credentials:set', (_event, creds) => {
 // but the UX let you wander in without knowing). This validates the
 // CANDIDATE creds (not whatever's already saved) against WordPress's
 // own built-in "who am I" endpoint before Setup accepts them.
-ipcMain.handle('credentials:validate', async (_event, { username, appPassword }) => {
+// PIN mode validates against lach/v1/whoami (a route this project's own
+// PIN-auth wrapper understands) instead of WordPress's core /wp/v2/users/me -
+// that endpoint only recognizes real Basic Auth/cookie sessions, not the
+// custom X-Lach-Helper-Pin header, so it would reject a correct PIN.
+ipcMain.handle('credentials:validate', async (_event, { mode, username, appPassword, pin }) => {
   try {
-    const res = await fetch(`${WP_API.replace('/lach/v1', '')}/wp/v2/users/me`, {
-      headers: { Authorization: `Basic ${Buffer.from(`${username}:${appPassword}`).toString('base64')}` },
-    })
+    const res =
+      mode === 'pin'
+        ? await fetch(`${WP_API}/whoami`, { headers: { 'X-Lach-Helper-Pin': pin } })
+        : await fetch(`${WP_API.replace('/lach/v1', '')}/wp/v2/users/me`, {
+            headers: { Authorization: `Basic ${Buffer.from(`${username}:${appPassword}`).toString('base64')}` },
+          })
     if (res.ok) return { valid: true }
-    if (res.status === 401 || res.status === 403) return { valid: false, error: 'Nepareizs lietotājvārds vai Application Password' }
+    if (res.status === 401 || res.status === 403)
+      return { valid: false, error: mode === 'pin' ? 'Nepareizs PIN' : 'Nepareizs lietotājvārds vai Application Password' }
     return { valid: false, error: `WordPress atbildēja ar HTTP ${res.status}` }
   } catch (err) {
     return { valid: false, error: err.message }
@@ -274,7 +295,7 @@ ipcMain.handle('protocol:parse', async (_event, { filePath, gameId, seasonId }) 
   let existingYoutubeUrl = ''
   let existingProtocolScanUrl = ''
   try {
-    const statusRes = await fetch(`${WP_API}/game-autofill/${game.game_id}`, { headers: { Authorization: wpAuthHeader() } })
+    const statusRes = await fetch(`${WP_API}/game-autofill/${game.game_id}`, { headers: { ...wpAuthHeaders() } })
     if (!statusRes.ok) throw new Error(`game-autofill status check: HTTP ${statusRes.status}`)
     const statusBody = await statusRes.json()
     alreadyHasData = (statusBody.stats_table_rows || []).some((row) =>
@@ -320,7 +341,7 @@ ipcMain.handle('protocol:parse', async (_event, { filePath, gameId, seasonId }) 
 ipcMain.handle('game:save', async (_event, { gameId, payload }) => {
   const res = await fetch(`${WP_API}/game-autofill/${gameId}`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: wpAuthHeader() },
+    headers: { 'Content-Type': 'application/json', ...wpAuthHeaders() },
     body: JSON.stringify(payload),
   })
   const body = await res.json()
@@ -464,7 +485,7 @@ ipcMain.handle('game:createManualPreview', async (_event, { parsed, homeTeamId, 
 ipcMain.handle('players:createMissing', async (_event, { teamId, players, replace }) => {
   const res = await fetch(`${WP_API}/create-players/`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: wpAuthHeader() },
+    headers: { 'Content-Type': 'application/json', ...wpAuthHeaders() },
     body: JSON.stringify({ team_id: teamId, players, replace: Boolean(replace) }),
   })
   const body = await res.json()
@@ -482,7 +503,7 @@ ipcMain.handle('players:createMissing', async (_event, { teamId, players, replac
 ipcMain.handle('game:finishScheduled', async (_event, { gameId, gameFields, payload }) => {
   const res = await fetch(`${WP_API}/finish-scheduled-game/${gameId}`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: wpAuthHeader() },
+    headers: { 'Content-Type': 'application/json', ...wpAuthHeaders() },
     body: JSON.stringify({
       home_scores: gameFields.home_scores,
       away_scores: gameFields.away_scores,
@@ -501,7 +522,7 @@ ipcMain.handle('game:finishScheduled', async (_event, { gameId, gameFields, payl
 ipcMain.handle('game:createNewSave', async (_event, { seasonCombo, homeTeamId, awayTeamId, venueId, kickoff, gameFields, payload }) => {
   const res = await fetch(`${WP_API}/create-finished-game/`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: wpAuthHeader() },
+    headers: { 'Content-Type': 'application/json', ...wpAuthHeaders() },
     body: JSON.stringify({
       season_id: seasonCombo.seasonId,
       tournament_id: seasonCombo.tournamentId,
@@ -536,7 +557,7 @@ ipcMain.handle('schedule:update', async (_event, { gameId, kickoff, venueId }) =
   if (venueId !== undefined && venueId !== null && venueId !== '') body.venue_id = venueId
   const res = await fetch(`${WP_API}/update-game-schedule/${gameId}`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: wpAuthHeader() },
+    headers: { 'Content-Type': 'application/json', ...wpAuthHeaders() },
     body: JSON.stringify(body),
   })
   const responseBody = await res.json()
@@ -549,8 +570,31 @@ ipcMain.handle('schedule:update', async (_event, { gameId, kickoff, venueId }) =
 // Thin passthroughs to lach-diagnostics.php (lach-hockey-app repo) - all
 // GET, all scoped server-side to sl_* post types only, nothing here can
 // write anything.
+// --- Admin: helper PIN (see lach-helper-pin-auth.php) --------------------
+//
+// Lets Kristians (real Application Password only - the endpoint itself
+// refuses the PIN as auth for managing the PIN) view whether one is set and
+// rotate it, without ever needing to hand anyone his actual credential.
+ipcMain.handle('helperPin:get', async () => {
+  const res = await fetch(`${WP_API}/helper-pin`, { headers: { ...wpAuthHeaders() } })
+  const body = await res.json()
+  if (!res.ok) throw new Error(body.error || body.message || `HTTP ${res.status}`)
+  return body
+})
+
+ipcMain.handle('helperPin:set', async (_event, { pin }) => {
+  const res = await fetch(`${WP_API}/helper-pin`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...wpAuthHeaders() },
+    body: JSON.stringify({ pin }),
+  })
+  const body = await res.json()
+  if (!res.ok) throw new Error(body.error || body.message || `HTTP ${res.status}`)
+  return body
+})
+
 ipcMain.handle('diag:post', async (_event, { id }) => {
-  const res = await fetch(`${WP_API}/diag/post/${id}`, { headers: { Authorization: wpAuthHeader() } })
+  const res = await fetch(`${WP_API}/diag/post/${id}`, { headers: { ...wpAuthHeaders() } })
   const body = await res.json()
   if (!res.ok) throw new Error(body.error || body.message || `HTTP ${res.status}`)
   return body
@@ -558,7 +602,7 @@ ipcMain.handle('diag:post', async (_event, { id }) => {
 
 ipcMain.handle('diag:searchMeta', async (_event, { q }) => {
   const res = await fetch(`${WP_API}/diag/search-meta?q=${encodeURIComponent(q)}`, {
-    headers: { Authorization: wpAuthHeader() },
+    headers: { ...wpAuthHeaders() },
   })
   const body = await res.json()
   if (!res.ok) throw new Error(body.error || body.message || `HTTP ${res.status}`)
@@ -567,7 +611,7 @@ ipcMain.handle('diag:searchMeta', async (_event, { q }) => {
 
 ipcMain.handle('diag:tableRow', async (_event, { table, id }) => {
   const res = await fetch(`${WP_API}/diag/table/${encodeURIComponent(table)}/${id}`, {
-    headers: { Authorization: wpAuthHeader() },
+    headers: { ...wpAuthHeaders() },
   })
   const body = await res.json()
   if (!res.ok) throw new Error(body.error || body.message || `HTTP ${res.status}`)
@@ -598,7 +642,7 @@ async function uploadMediaToWp(filePath, mimeByExt) {
   const mediaRes = await fetch(`${WP_API.replace('/lach/v1', '')}/wp/v2/media`, {
     method: 'POST',
     headers: {
-      Authorization: wpAuthHeader(),
+      ...wpAuthHeaders(),
       'Content-Type': mime,
       'Content-Disposition': `attachment; filename="${filename}"`,
     },
@@ -623,7 +667,7 @@ ipcMain.handle('team:uploadLogo', async (_event, { teamId, filePath }) => {
 
   const logoRes = await fetch(`${WP_API}/team-logo/${teamId}`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: wpAuthHeader() },
+    headers: { 'Content-Type': 'application/json', ...wpAuthHeaders() },
     body: JSON.stringify({ logo_url: mediaBody.source_url }),
   })
   const logoBody = await logoRes.json()
@@ -659,7 +703,7 @@ ipcMain.handle('media:uploadAttachment', async (_event, { filePath }) => {
 ipcMain.handle('games:bulkImport', async (_event, { seasonId, tournamentId, stageId, leagueId, roundId, groupId, games }) => {
   const res = await fetch(`${WP_API}/bulk-import-games/`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: wpAuthHeader() },
+    headers: { 'Content-Type': 'application/json', ...wpAuthHeaders() },
     body: JSON.stringify({
       season_id: seasonId,
       tournament_id: tournamentId,
@@ -685,7 +729,7 @@ ipcMain.handle('games:bulkImport', async (_event, { seasonId, tournamentId, stag
 ipcMain.handle('miniTournament:create', async (_event, { seasonId, tournamentId, stageId, leagueId, games }) => {
   const res = await fetch(`${WP_API}/mini-tournament-games/`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: wpAuthHeader() },
+    headers: { 'Content-Type': 'application/json', ...wpAuthHeaders() },
     body: JSON.stringify({ season_id: seasonId, tournament_id: tournamentId, stage_id: stageId, league_id: leagueId, games }),
   })
   const body = await res.json()
@@ -696,7 +740,7 @@ ipcMain.handle('miniTournament:create', async (_event, { seasonId, tournamentId,
 ipcMain.handle('miniTournament:resolve', async (_event, { gameId, homeTeamId, awayTeamId }) => {
   const res = await fetch(`${WP_API}/mini-tournament-games/${gameId}/resolve`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: wpAuthHeader() },
+    headers: { 'Content-Type': 'application/json', ...wpAuthHeaders() },
     body: JSON.stringify({ home_team: homeTeamId, away_team: awayTeamId }),
   })
   const body = await res.json()
@@ -714,7 +758,7 @@ ipcMain.handle('miniTournament:resolve', async (_event, { gameId, homeTeamId, aw
 ipcMain.handle('team:updateName', async (_event, { teamId, name }) => {
   const res = await fetch(`${WP_API}/update-team-name/${teamId}`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: wpAuthHeader() },
+    headers: { 'Content-Type': 'application/json', ...wpAuthHeaders() },
     body: JSON.stringify({ name }),
   })
   const body = await res.json()
@@ -729,7 +773,7 @@ ipcMain.handle('team:updateName', async (_event, { teamId, name }) => {
 ipcMain.handle('player:updateName', async (_event, { playerId, name }) => {
   const res = await fetch(`${WP_API}/update-player-name/${playerId}`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: wpAuthHeader() },
+    headers: { 'Content-Type': 'application/json', ...wpAuthHeaders() },
     body: JSON.stringify({ name }),
   })
   const body = await res.json()

@@ -1,6 +1,6 @@
-import { forwardRef, useImperativeHandle, useState } from 'react'
-import { diagPost, diagSearchMeta, diagTableRow } from '../../api'
-import { Panel, ScreenHeader, TextInput, PrimaryButton, ErrorText } from './AdminUI'
+import { forwardRef, useImperativeHandle, useEffect, useState } from 'react'
+import { diagPost, diagSearchMeta, diagTableRow, getHelperPin, setHelperPin } from '../../api'
+import { Panel, ScreenHeader, TextInput, PrimaryButton, ErrorText, SuccessText } from './AdminUI'
 
 // Purely read-only - lach-diagnostics.php never writes anything, scoped
 // server-side to sl_* post types only. Never dirty - there's nothing here
@@ -16,6 +16,7 @@ const Diagnostics = forwardRef(function Diagnostics({ onCancel }, ref) {
   return (
     <div className="space-y-4">
       <ScreenHeader title="Diagnostika" subtitle="Tikai lasīšanai - neko nemaina WordPress pusē." onCancel={onCancel} />
+      <HelperPinManager />
       <PostLookup />
       <MetaSearch />
       <TableRowLookup />
@@ -24,6 +25,57 @@ const Diagnostics = forwardRef(function Diagnostics({ onCancel }, ref) {
 })
 
 export default Diagnostics
+
+// The PIN is what gets shared with helpers (WhatsApp etc.) instead of the
+// real Application Password - see lach-hockey-app's lach-helper-pin-auth.php.
+// Only this endpoint's own real-auth requirement (never the PIN itself) can
+// set/rotate it, so a leaked PIN alone can never be used to mint a new one.
+function HelperPinManager() {
+  const [isSet, setIsSet] = useState(null)
+  const [newPin, setNewPin] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [saved, setSaved] = useState(false)
+  const [error, setError] = useState(null)
+
+  useEffect(() => {
+    getHelperPin()
+      .then((r) => setIsSet(r.set))
+      .catch((err) => setError(err.message))
+  }, [])
+
+  async function save() {
+    setSaving(true)
+    setError(null)
+    setSaved(false)
+    try {
+      await setHelperPin(newPin.trim())
+      setIsSet(true)
+      setSaved(true)
+      setNewPin('')
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <Panel>
+      <h3 className="text-sm font-black uppercase text-ink-faint tracking-wide">Palīgu PIN kods</h3>
+      <p className="text-ink-faint text-xs">
+        {isSet === null ? 'Ielādē...' : isSet ? 'PIN kods ir iestatīts.' : 'PIN kods vēl nav iestatīts - palīgi nevarēs pieslēgties, kamēr tas nav uzstādīts.'}
+      </p>
+      <div className="flex gap-2">
+        <TextInput value={newPin} onChange={setNewPin} placeholder="Jauns PIN kods (vismaz 8 simboli)" />
+        <PrimaryButton onClick={save} disabled={newPin.trim().length < 8 || saving}>
+          {saving ? 'Saglabā...' : isSet ? 'Nomainīt' : 'Iestatīt'}
+        </PrimaryButton>
+      </div>
+      {saved && <SuccessText>Saglabāts! Iepriekšējais PIN vairs nedarbosies.</SuccessText>}
+      <ErrorText>{error}</ErrorText>
+    </Panel>
+  )
+}
 
 function ResultBlock({ result }) {
   if (!result) return null

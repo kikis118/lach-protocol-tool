@@ -24,6 +24,14 @@ import sampleProtocolImg from './assets/sample-protocol-preview.png'
 // changes, then relog").
 const REVALIDATE_AFTER_MS = 90 * 24 * 60 * 60 * 1000
 
+// Two credential shapes now (see Setup.jsx): 'pin' mode only needs a pin,
+// 'password' mode needs username+appPassword - checked in every place that
+// used to just look at username/appPassword directly.
+function hasLoginCreds(creds) {
+  if (!creds) return false
+  return creds.mode === 'pin' ? Boolean(creds.pin) : Boolean(creds.username && creds.appPassword)
+}
+
 export default function App() {
   const [credentials, setCredentialsState] = useState(null) // null = still loading
   const [showSettings, setShowSettings] = useState(false)
@@ -105,7 +113,7 @@ export default function App() {
   useEffect(() => {
     getCredentials().then(async (creds) => {
       setCredentialsState(creds)
-      if (!creds?.username || !creds?.appPassword) return
+      if (!hasLoginCreds(creds)) return
       const age = creds.validatedAt ? Date.now() - new Date(creds.validatedAt).getTime() : Infinity
       if (age < REVALIDATE_AFTER_MS) return
       const check = await validateCredentials(creds)
@@ -129,7 +137,7 @@ export default function App() {
   }, [])
 
   useEffect(() => {
-    if (credentials?.username && credentials?.appPassword) {
+    if (hasLoginCreds(credentials)) {
       getLookups().then(setLookups)
     }
   }, [credentials])
@@ -266,7 +274,7 @@ export default function App() {
     }
   }
 
-  const hasCredentials = credentials?.username && credentials?.appPassword && !revalidationError
+  const hasCredentials = hasLoginCreds(credentials) && !revalidationError
   // Same exact-match convention as GameEditor.jsx's own isDevUser - gates
   // DEV_TOOLS (raw diagnostics) to one personal login, now that
   // GlobalSearch covers the everyday "find and fix something" need for
