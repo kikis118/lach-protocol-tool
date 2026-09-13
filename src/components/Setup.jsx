@@ -128,7 +128,6 @@ export default function Setup({ initial, onSaved, revalidationError }) {
             type="text"
             value={pin}
             onChange={(e) => setPin(e.target.value)}
-            placeholder="Prasi PIN kodu no komandas vadītāja"
             className="w-full bg-surface border border-line-strong rounded-md px-3 py-2 text-ink text-sm transition-all focus:outline-none focus:border-accent focus:ring-2 focus:ring-accent/20 hover:border-ink-faint"
           />
         </div>
