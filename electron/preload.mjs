@@ -21,6 +21,7 @@ contextBridge.exposeInMainWorld('lachTool', {
   getUpdateStatus: () => ipcRenderer.invoke('updates:status'),
   installUpdate: () => ipcRenderer.invoke('updates:install'),
   updateSchedule: (args) => ipcRenderer.invoke('schedule:update', args),
+  deleteGame: (gameId) => ipcRenderer.invoke('schedule:deleteGame', { gameId }),
   diagPost: (id) => ipcRenderer.invoke('diag:post', { id }),
   diagSearchMeta: (q) => ipcRenderer.invoke('diag:searchMeta', { q }),
   diagTableRow: (table, id) => ipcRenderer.invoke('diag:tableRow', { table, id }),
@@ -36,6 +37,7 @@ contextBridge.exposeInMainWorld('lachTool', {
   getHelperPins: () => ipcRenderer.invoke('helperPins:get'),
   setHelperPin: (name, pin) => ipcRenderer.invoke('helperPins:set', { name, pin }),
   deleteHelperPin: (name) => ipcRenderer.invoke('helperPins:delete', { name }),
+  getActivityLog: () => ipcRenderer.invoke('activityLog:get'),
   // contextBridge deep-freezes exposed VALUES, not functions - this
   // closure-based subscribe (rather than exposing ipcRenderer.on
   // directly) is what a frozen object can still safely offer, and

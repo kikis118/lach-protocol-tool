@@ -1,5 +1,5 @@
 import { forwardRef, useImperativeHandle, useEffect, useState } from 'react'
-import { diagPost, diagSearchMeta, diagTableRow, getHelperPins, setHelperPin, deleteHelperPin } from '../../api'
+import { diagPost, diagSearchMeta, diagTableRow, getHelperPins, setHelperPin, deleteHelperPin, getActivityLog } from '../../api'
 import { Panel, ScreenHeader, TextInput, PrimaryButton, SecondaryButton, ErrorText, SuccessText } from './AdminUI'
 
 // Mostly read-only (lach-diagnostics.php itself never writes anything,
@@ -19,6 +19,7 @@ const Diagnostics = forwardRef(function Diagnostics({ onCancel }, ref) {
     <div className="space-y-4">
       <ScreenHeader title="Diagnostika" subtitle="Tikai lasīšanai - neko nemaina WordPress pusē." onCancel={onCancel} />
       <HelperPinManager />
+      <ActivityLog />
       <PostLookup />
       <MetaSearch />
       <TableRowLookup />
@@ -113,6 +114,59 @@ function HelperPinManager() {
         </SecondaryButton>
       </div>
       <ErrorText>{error}</ErrorText>
+    </Panel>
+  )
+}
+
+// Who changed what - see lach-hockey-app's lach-activity-log.php. `actor`
+// resolves to a named helper PIN's name, a real WordPress username, or
+// "automātiski (cron)" for the one action (playoff slot resolution) that
+// can also happen without any human request at all.
+function ActivityLog() {
+  const [entries, setEntries] = useState(null)
+  const [error, setError] = useState(null)
+  const [loading, setLoading] = useState(false)
+
+  function load() {
+    setLoading(true)
+    setError(null)
+    getActivityLog()
+      .then((r) => setEntries(r.entries || []))
+      .catch((err) => setError(err.message))
+      .finally(() => setLoading(false))
+  }
+
+  useEffect(load, [])
+
+  return (
+    <Panel>
+      <div className="flex items-center justify-between">
+        <h3 className="text-sm font-black uppercase text-ink-faint tracking-wide">Aktivitātes žurnāls</h3>
+        <SecondaryButton onClick={load} disabled={loading} className="px-3 py-1.5">
+          {loading ? '...' : 'Atsvaidzināt'}
+        </SecondaryButton>
+      </div>
+      <p className="text-ink-faint text-xs">
+        Pēdējās {entries?.length ?? 0} darbības (jaunākā augšā). Saglabātas ierobežotu laiku - nav pastāvīgs vēstures ieraksts.
+      </p>
+      <ErrorText>{error}</ErrorText>
+      {entries && (
+        <div className="space-y-1.5 max-h-96 overflow-auto">
+          {entries.length === 0 && <p className="text-ink-faint text-sm">Vēl nav neviena ieraksta.</p>}
+          {entries.map((e, i) => (
+            <div key={i} className="bg-surface border border-line-strong rounded-md px-3 py-2 text-sm">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-ink font-semibold">{e.action}</span>
+                <span className="text-ink-faint text-xs shrink-0">{e.time}</span>
+              </div>
+              <p className="text-ink-secondary text-xs mt-0.5">
+                {e.actor}
+                {e.details ? ` — ${e.details}` : ''}
+              </p>
+            </div>
+          ))}
+        </div>
+      )}
     </Panel>
   )
 }

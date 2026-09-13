@@ -602,6 +602,7 @@ export default function App() {
                 lookups={lookups}
                 initialGameId={adminScreenParams.initialGameId}
                 onCancel={handleCancel}
+                askConfirm={askConfirm}
               />
             )}
             {adminScreen === 'roster' && (

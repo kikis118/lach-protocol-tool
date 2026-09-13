@@ -76,6 +76,10 @@ export function updateSchedule(args) {
   return window.lachTool.updateSchedule(args)
 }
 
+export function deleteGame(gameId) {
+  return window.lachTool.deleteGame(gameId)
+}
+
 export function diagPost(id) {
   return window.lachTool.diagPost(id)
 }
@@ -134,4 +138,8 @@ export function setHelperPin(name, pin) {
 
 export function deleteHelperPin(name) {
   return window.lachTool.deleteHelperPin(name)
+}
+
+export function getActivityLog() {
+  return window.lachTool.getActivityLog()
 }

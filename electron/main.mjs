@@ -565,6 +565,21 @@ ipcMain.handle('schedule:update', async (_event, { gameId, kickoff, venueId }) =
   return responseBody
 })
 
+// Permanently removes a not-yet-played game (mistakenly duplicated, or no
+// longer happening) - same finished-game refusal as the update above, see
+// update-game-schedule.php's own DELETE-route comment for why this is a
+// real delete (not a trash) and why it's not recoverable from within
+// either app.
+ipcMain.handle('schedule:deleteGame', async (_event, { gameId }) => {
+  const res = await fetch(`${WP_API}/update-game-schedule/${gameId}`, {
+    method: 'DELETE',
+    headers: { ...wpAuthHeaders() },
+  })
+  const body = await res.json()
+  if (!res.ok) throw new Error(body.error || body.message || `HTTP ${res.status}`)
+  return body
+})
+
 // --- Admin: helper PINs (see lach-helper-pin-auth.php) -------------------
 //
 // Lets Kristians (real Application Password only - these endpoints refuse
@@ -595,6 +610,17 @@ ipcMain.handle('helperPins:delete', async (_event, { name }) => {
     method: 'DELETE',
     headers: { ...wpAuthHeaders() },
   })
+  const body = await res.json()
+  if (!res.ok) throw new Error(body.error || body.message || `HTTP ${res.status}`)
+  return body
+})
+
+// --- Admin: activity log (see lach-activity-log.php) ----------------------
+//
+// Who changed what - real-auth only (same as helper-pin management), since
+// even just viewing this is sensitive enough to keep off the PIN-auth path.
+ipcMain.handle('activityLog:get', async () => {
+  const res = await fetch(`${WP_API}/activity-log`, { headers: { ...wpAuthHeaders() } })
   const body = await res.json()
   if (!res.ok) throw new Error(body.error || body.message || `HTTP ${res.status}`)
   return body

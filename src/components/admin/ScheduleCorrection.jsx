@@ -1,5 +1,5 @@
 import { forwardRef, useImperativeHandle, useMemo, useState } from 'react'
-import { updateSchedule } from '../../api'
+import { updateSchedule, deleteGame } from '../../api'
 import {
   Panel,
   Field,
@@ -7,26 +7,32 @@ import {
   SelectInput,
   VenueSelect,
   PrimaryButton,
+  SecondaryButton,
   ErrorText,
   SuccessText,
   kickoffToDatetimeLocal,
   fromDatetimeLocal,
 } from './AdminUI'
 
-const ScheduleCorrection = forwardRef(function ScheduleCorrection({ lookups, onCancel, initialGameId }, ref) {
+const ScheduleCorrection = forwardRef(function ScheduleCorrection({ lookups, onCancel, initialGameId, askConfirm }, ref) {
   const teams = lookups?.teams || []
   const venues = lookups?.venues || []
   const teamName = (id) => teams.find((t) => String(t.id) === String(id))?.name || `#${id}`
 
   // update-game-schedule.php itself refuses (409) to touch a finished game -
   // filtering those out here just avoids picking one that will predictably fail.
+  // deletedIds: games deleted THIS session - `lookups` is a snapshot fetched
+  // once when the app opened and never refreshed, so a just-deleted game
+  // would otherwise keep showing in the dropdown (and 404 if re-selected)
+  // until the app reopens.
+  const [deletedIds, setDeletedIds] = useState(() => new Set())
   const upcomingGames = useMemo(
     () =>
       (lookups?.games || [])
-        .filter((g) => g.finished !== '1')
+        .filter((g) => g.finished !== '1' && !deletedIds.has(String(g.game_id)))
         .slice()
         .sort((a, b) => new Date(a.kickoff) - new Date(b.kickoff)),
-    [lookups],
+    [lookups, deletedIds],
   )
 
   const initialGame = initialGameId ? upcomingGames.find((g) => String(g.game_id) === String(initialGameId)) : null
@@ -37,6 +43,7 @@ const ScheduleCorrection = forwardRef(function ScheduleCorrection({ lookups, onC
   const [venueId, setVenueId] = useState(initialGame?.venue_id ? String(initialGame.venue_id) : '')
   const [error, setError] = useState(null)
   const [saveState, setSaveState] = useState('idle')
+  const [deleteState, setDeleteState] = useState('idle')
 
   function pickGame(id) {
     setGameId(id)
@@ -44,6 +51,7 @@ const ScheduleCorrection = forwardRef(function ScheduleCorrection({ lookups, onC
     setKickoff(g ? kickoffToDatetimeLocal(g.kickoff) : '')
     setVenueId(g?.venue_id ? String(g.venue_id) : '')
     setSaveState('idle')
+    setDeleteState('idle')
     setError(null)
   }
 
@@ -59,6 +67,25 @@ const ScheduleCorrection = forwardRef(function ScheduleCorrection({ lookups, onC
       setSaveState('saved')
     } catch (err) {
       setSaveState('failed')
+      setError(err.message)
+    }
+  }
+
+  async function handleDelete() {
+    const ok = await askConfirm(
+      `Vai tiešām dzēst spēli "${teamName(selectedGame.home_team)} vs ${teamName(selectedGame.away_team)}"? To nevar atsaukt.`,
+      { danger: true },
+    )
+    if (!ok) return
+    setDeleteState('deleting')
+    setError(null)
+    try {
+      await deleteGame(selectedGame.game_id)
+      setDeletedIds((prev) => new Set(prev).add(String(selectedGame.game_id)))
+      setGameId('')
+      setDeleteState('idle')
+    } catch (err) {
+      setDeleteState('failed')
       setError(err.message)
     }
   }
@@ -123,6 +150,16 @@ const ScheduleCorrection = forwardRef(function ScheduleCorrection({ lookups, onC
             </PrimaryButton>
             {saveState === 'saved' && <SuccessText>Saglabāts!</SuccessText>}
             <ErrorText>{error}</ErrorText>
+          </div>
+
+          <div className="pt-2 border-t border-line-strong">
+            <SecondaryButton
+              onClick={handleDelete}
+              disabled={deleteState === 'deleting'}
+              className="!border-red-500/40 !text-red-400 hover:!border-red-500 hover:!text-red-300"
+            >
+              {deleteState === 'deleting' ? 'Dzēš...' : 'Dzēst spēli'}
+            </SecondaryButton>
           </div>
         </Panel>
       )}
