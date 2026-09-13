@@ -1,10 +1,12 @@
 import { forwardRef, useImperativeHandle, useEffect, useState } from 'react'
-import { diagPost, diagSearchMeta, diagTableRow, getHelperPin, setHelperPin } from '../../api'
-import { Panel, ScreenHeader, TextInput, PrimaryButton, ErrorText, SuccessText } from './AdminUI'
+import { diagPost, diagSearchMeta, diagTableRow, getHelperPins, setHelperPin, deleteHelperPin } from '../../api'
+import { Panel, ScreenHeader, TextInput, PrimaryButton, SecondaryButton, ErrorText, SuccessText } from './AdminUI'
 
-// Purely read-only - lach-diagnostics.php never writes anything, scoped
-// server-side to sl_* post types only. Never dirty - there's nothing here
-// that leaving could ever lose.
+// Mostly read-only (lach-diagnostics.php itself never writes anything,
+// scoped server-side to sl_* post types only) plus the helper-PIN manager
+// below, which does write. isDirty stays false regardless - a typed-but-
+// unsaved name/PIN is cheap to retype, not worth the same loss-prevention
+// machinery as the heavier multi-field admin forms.
 
 const TABLE_OPTIONS = [
   { value: 'games', label: 'games (wp_sl_games, pēc game_id)' },
@@ -26,32 +28,36 @@ const Diagnostics = forwardRef(function Diagnostics({ onCancel }, ref) {
 
 export default Diagnostics
 
-// The PIN is what gets shared with helpers (WhatsApp etc.) instead of the
-// real Application Password - see lach-hockey-app's lach-helper-pin-auth.php.
-// Only this endpoint's own real-auth requirement (never the PIN itself) can
-// set/rotate it, so a leaked PIN alone can never be used to mint a new one.
+// Named PINs (not one shared secret) - see lach-hockey-app's
+// lach-helper-pin-auth.php. Each is what gets shared with ONE helper
+// (WhatsApp DM etc.) instead of the real Application Password, and each is
+// independently revocable - dropping one person doesn't force reissuing
+// everyone else's. Only this endpoint's own real-auth requirement (never a
+// PIN itself) can add/rotate/remove an entry, so a leaked PIN alone can
+// never be used to mint or delete one.
 function HelperPinManager() {
-  const [isSet, setIsSet] = useState(null)
-  const [newPin, setNewPin] = useState('')
+  const [pins, setPins] = useState(null)
+  const [name, setName] = useState('')
+  const [pin, setPin] = useState('')
   const [saving, setSaving] = useState(false)
-  const [saved, setSaved] = useState(false)
   const [error, setError] = useState(null)
 
-  useEffect(() => {
-    getHelperPin()
-      .then((r) => setIsSet(r.set))
+  function load() {
+    getHelperPins()
+      .then((r) => setPins(r.pins || []))
       .catch((err) => setError(err.message))
-  }, [])
+  }
+
+  useEffect(load, [])
 
   async function save() {
     setSaving(true)
     setError(null)
-    setSaved(false)
     try {
-      await setHelperPin(newPin.trim())
-      setIsSet(true)
-      setSaved(true)
-      setNewPin('')
+      const result = await setHelperPin(name.trim(), pin.trim())
+      setPins(result.pins || [])
+      setName('')
+      setPin('')
     } catch (err) {
       setError(err.message)
     } finally {
@@ -59,19 +65,53 @@ function HelperPinManager() {
     }
   }
 
+  async function remove(entryName) {
+    setError(null)
+    try {
+      const result = await deleteHelperPin(entryName)
+      setPins(result.pins || [])
+    } catch (err) {
+      setError(err.message)
+    }
+  }
+
   return (
     <Panel>
-      <h3 className="text-sm font-black uppercase text-ink-faint tracking-wide">Palīgu PIN kods</h3>
+      <h3 className="text-sm font-black uppercase text-ink-faint tracking-wide">Palīgu PIN kodi</h3>
       <p className="text-ink-faint text-xs">
-        {isSet === null ? 'Ielādē...' : isSet ? 'PIN kods ir iestatīts.' : 'PIN kods vēl nav iestatīts - palīgi nevarēs pieslēgties, kamēr tas nav uzstādīts.'}
+        Katram palīgam savs PIN kods - dalies ar to individuāli (piem. WhatsApp), nevis viens kods visiem. Dzēšot vienu, pārējie turpina darboties.
       </p>
+
+      {pins === null ? (
+        <p className="text-ink-faint text-sm">Ielādē...</p>
+      ) : pins.length === 0 ? (
+        <p className="text-ink-faint text-sm">Vēl neviens PIN nav iestatīts.</p>
+      ) : (
+        <div className="space-y-1.5">
+          {pins.map((p) => (
+            <div key={p.name} className="flex items-center gap-2 bg-surface border border-line-strong rounded-md px-3 py-2">
+              <span className="flex-1 text-ink text-sm font-semibold">{p.name}</span>
+              <span className="text-ink-faint text-xs font-mono">{p.pin}</span>
+              <button
+                type="button"
+                onClick={() => remove(p.name)}
+                aria-label="Dzēst"
+                className="w-7 h-7 shrink-0 rounded-md text-ink-faint hover:text-red-400 hover:bg-red-500/10 transition-colors flex items-center justify-center"
+              >
+                &times;
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
       <div className="flex gap-2">
-        <TextInput value={newPin} onChange={setNewPin} placeholder="Jauns PIN kods (vismaz 8 simboli)" />
-        <PrimaryButton onClick={save} disabled={newPin.trim().length < 8 || saving}>
-          {saving ? 'Saglabā...' : isSet ? 'Nomainīt' : 'Iestatīt'}
-        </PrimaryButton>
+        <TextInput value={name} onChange={setName} placeholder="Vārds (piem. Andris)" />
+        <TextInput value={pin} onChange={setPin} placeholder="PIN kods (vismaz 8 simboli)" />
+        <SecondaryButton onClick={save} disabled={!name.trim() || pin.trim().length < 8 || saving} className="shrink-0">
+          {saving ? 'Saglabā...' : 'Pievienot'}
+        </SecondaryButton>
       </div>
-      {saved && <SuccessText>Saglabāts! Iepriekšējais PIN vairs nedarbosies.</SuccessText>}
       <ErrorText>{error}</ErrorText>
     </Panel>
   )

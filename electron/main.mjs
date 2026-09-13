@@ -565,33 +565,46 @@ ipcMain.handle('schedule:update', async (_event, { gameId, kickoff, venueId }) =
   return responseBody
 })
 
-// --- Admin: read-only diagnostics ----------------------------------------
+// --- Admin: helper PINs (see lach-helper-pin-auth.php) -------------------
 //
-// Thin passthroughs to lach-diagnostics.php (lach-hockey-app repo) - all
-// GET, all scoped server-side to sl_* post types only, nothing here can
-// write anything.
-// --- Admin: helper PIN (see lach-helper-pin-auth.php) --------------------
-//
-// Lets Kristians (real Application Password only - the endpoint itself
-// refuses the PIN as auth for managing the PIN) view whether one is set and
-// rotate it, without ever needing to hand anyone his actual credential.
-ipcMain.handle('helperPin:get', async () => {
-  const res = await fetch(`${WP_API}/helper-pin`, { headers: { ...wpAuthHeaders() } })
+// Lets Kristians (real Application Password only - these endpoints refuse
+// a PIN as auth for managing PINs) view, add/rotate, and remove named
+// helper PINs without ever needing to hand anyone his actual credential.
+// Named (not one shared PIN) so dropping one helper doesn't force
+// reissuing everyone else's.
+ipcMain.handle('helperPins:get', async () => {
+  const res = await fetch(`${WP_API}/helper-pins`, { headers: { ...wpAuthHeaders() } })
   const body = await res.json()
   if (!res.ok) throw new Error(body.error || body.message || `HTTP ${res.status}`)
   return body
 })
 
-ipcMain.handle('helperPin:set', async (_event, { pin }) => {
-  const res = await fetch(`${WP_API}/helper-pin`, {
+ipcMain.handle('helperPins:set', async (_event, { name, pin }) => {
+  const res = await fetch(`${WP_API}/helper-pins`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...wpAuthHeaders() },
-    body: JSON.stringify({ pin }),
+    body: JSON.stringify({ name, pin }),
   })
   const body = await res.json()
   if (!res.ok) throw new Error(body.error || body.message || `HTTP ${res.status}`)
   return body
 })
+
+ipcMain.handle('helperPins:delete', async (_event, { name }) => {
+  const res = await fetch(`${WP_API}/helper-pins/${encodeURIComponent(name)}`, {
+    method: 'DELETE',
+    headers: { ...wpAuthHeaders() },
+  })
+  const body = await res.json()
+  if (!res.ok) throw new Error(body.error || body.message || `HTTP ${res.status}`)
+  return body
+})
+
+// --- Admin: read-only diagnostics ----------------------------------------
+//
+// Thin passthroughs to lach-diagnostics.php (lach-hockey-app repo) - all
+// GET, all scoped server-side to sl_* post types only, nothing here can
+// write anything.
 
 ipcMain.handle('diag:post', async (_event, { id }) => {
   const res = await fetch(`${WP_API}/diag/post/${id}`, { headers: { ...wpAuthHeaders() } })

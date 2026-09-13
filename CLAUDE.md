@@ -8,20 +8,35 @@ context that isn't obvious from reading the code cold — mostly hockey domain r
 encoded in the parsing/save logic, and repo-level constraints that are easy to
 accidentally break.
 
-## A second, mobile web version now exists in the sibling repo
+## A second, mobile web version now exists in the sibling repo — and is meant to become THE app
 
-`lach-hockey-app/admin-app/` (2026-09-13) is a separate, phone-usable web admin
-app deployed to `lach.lv/admin/`, covering roster management and schedule
-correction only (the two screens with no backend gap). It's a manual fork of
-`RosterManagement.jsx`/`ScheduleCorrection.jsx`/`AdminUI.jsx`/`adminDrafts.js`
-from this repo, plus a browser-`fetch` reimplementation of the relevant
-`api.js`/`electron/main.mjs` calls (no IPC there - it's a plain SPA, not
-Electron) - same "port by hand, keep in sync" discipline this file already
-documents for the parsing libs shared with `lach-hockey-app`. A fix to either
-of those two screens' logic here needs manual porting there too, and vice
-versa. See that repo's own `CLAUDE.md` ("`admin-app/` — a second, separate
-SPA...") for the full rationale (why same-origin avoids needing CORS, why no
-`.htaccess` change was needed, why it lives in that repo instead of a new one).
+`lach-hockey-app/admin-app/` (2026-09-13, reached full parity with this app the
+same day) is a separate, phone-usable web admin app deployed to `lach.lv/admin/`,
+covering every admin screen this repo has - roster, schedule, team editor, bulk
+import, mini-tournament, global search, AND the unified PDF-upload game editor
+(`GameEditor.jsx`, ported as `admin-app/src/components/GameEditor.jsx` with only
+its file-handling touchpoints changed - browser `File`/`ArrayBuffer` instead of
+a filesystem path, everything else identical). Per Kristians's own direction,
+this desktop app is being kept around for dev/fallback use only going forward,
+not maintained as a permanent second app in parallel with the web version.
+
+Every ported screen/lib is a manual fork - `RosterManagement.jsx`,
+`ScheduleCorrection.jsx`, `TeamEditor.jsx`, `BulkImportGames.jsx`,
+`MiniTournament.jsx`, `GlobalSearch.jsx`, `AdminUI.jsx`, `adminDrafts.js`,
+`GameEditor.jsx`, `GamePicker.jsx`, `GameSummary.jsx`, `protocolHistory.js`,
+plus `electron/lib/*.mjs` (as `admin-app/src/protocol/*.mjs`) and
+`electron/main.mjs`'s handler bodies (as `admin-app/src/api.js`, browser
+`fetch`/`File.arrayBuffer()` instead of IPC + Node `fs`/`Buffer`) - same "port
+by hand, keep in sync" discipline this file already documents for the parsing
+libs shared with `lach-hockey-app`'s own `scripts/lib/*`. A fix to ANY of this
+logic here needs manual porting there too, and vice versa - this is now a
+three-way fork (this repo, `lach-hockey-app/scripts/lib/`, and
+`lach-hockey-app/admin-app/src/protocol/`), not just two. See that repo's own
+CLAUDE.md ("`admin-app/` — a second, separate SPA...") for the full rationale
+(why same-origin avoids needing CORS, why no `.htaccess` change was needed, why
+it lives in that repo instead of a new one, and why the in-browser PDF parsing
+concern turned out to be a non-issue - `pdfjs-dist` is natively a browser
+library, verified live against a real sample protocol before shipping).
 
 ## The admin screens (src/components/admin/) and the unified game editor
 

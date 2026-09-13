@@ -124,10 +124,14 @@ export function updatePlayerName(args) {
   return window.lachTool.updatePlayerName(args)
 }
 
-export function getHelperPin() {
-  return window.lachTool.getHelperPin()
+export function getHelperPins() {
+  return window.lachTool.getHelperPins()
 }
 
-export function setHelperPin(pin) {
-  return window.lachTool.setHelperPin(pin)
+export function setHelperPin(name, pin) {
+  return window.lachTool.setHelperPin(name, pin)
+}
+
+export function deleteHelperPin(name) {
+  return window.lachTool.deleteHelperPin(name)
 }
