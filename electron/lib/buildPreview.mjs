@@ -146,6 +146,12 @@ export function buildPreview(parsed, game, teams, teamDetails, players, meta = {
     game_id: game.game_id,
     homeTeam: { name: teams[homeTeamId], team_id: homeTeamId },
     awayTeam: { name: teams[awayTeamId], team_id: awayTeamId },
+    // Which parsed side (A/B) is home - the protocol's own printed order
+    // never reliably matches WP's home/away (see aIsHome above), so any
+    // caller that wants to reinterpret parsed.goals/penalties/teamA/teamB
+    // itself (e.g. seeding an editable row-based UI) needs this rather
+    // than re-deriving it.
+    aIsHome,
     goalCountMatchesProtocol: parsed.qa.goalCountMatches,
     preview: {
       finalScore,

@@ -20,6 +20,19 @@ contextBridge.exposeInMainWorld('lachTool', {
   checkForUpdates: () => ipcRenderer.invoke('updates:check'),
   getUpdateStatus: () => ipcRenderer.invoke('updates:status'),
   installUpdate: () => ipcRenderer.invoke('updates:install'),
+  updateSchedule: (args) => ipcRenderer.invoke('schedule:update', args),
+  diagPost: (id) => ipcRenderer.invoke('diag:post', { id }),
+  diagSearchMeta: (q) => ipcRenderer.invoke('diag:searchMeta', { q }),
+  diagTableRow: (table, id) => ipcRenderer.invoke('diag:tableRow', { table, id }),
+  pickImage: () => ipcRenderer.invoke('dialog:pickImage'),
+  uploadTeamLogo: (args) => ipcRenderer.invoke('team:uploadLogo', args),
+  pickAttachment: () => ipcRenderer.invoke('dialog:pickAttachment'),
+  uploadAttachment: (args) => ipcRenderer.invoke('media:uploadAttachment', args),
+  bulkImportGames: (args) => ipcRenderer.invoke('games:bulkImport', args),
+  createMiniTournamentGames: (args) => ipcRenderer.invoke('miniTournament:create', args),
+  resolveMiniTournamentGame: (args) => ipcRenderer.invoke('miniTournament:resolve', args),
+  updateTeamName: (args) => ipcRenderer.invoke('team:updateName', args),
+  updatePlayerName: (args) => ipcRenderer.invoke('player:updateName', args),
   // contextBridge deep-freezes exposed VALUES, not functions - this
   // closure-based subscribe (rather than exposing ipcRenderer.on
   // directly) is what a frozen object can still safely offer, and

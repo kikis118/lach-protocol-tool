@@ -1,11 +1,17 @@
 import { useEffect, useRef, useState } from 'react'
-import { pickPdf, parseProtocol, saveGame, getCredentials, setCredentials, validateCredentials, openExternal, getLookups, checkForUpdates, getUpdateStatus, installUpdate, onUpdateStatus } from './api'
+import { pickPdf, parseProtocol, getCredentials, setCredentials, validateCredentials, openExternal, getLookups, checkForUpdates, getUpdateStatus, installUpdate, onUpdateStatus } from './api'
 import GamePicker from './components/GamePicker'
-import PreviewGame from './components/PreviewGame'
-import CreateNewGame from './components/CreateNewGame'
-import ManualProtocol from './components/ManualProtocol'
+import GameEditor from './components/GameEditor'
 import Setup from './components/Setup'
 import UpdateBadge from './components/UpdateBadge'
+import { FREQUENT_TOOLS, RARE_TOOLS, DEV_TOOLS } from './components/admin/toolSections'
+import GlobalSearch from './components/admin/GlobalSearch'
+import ScheduleCorrection from './components/admin/ScheduleCorrection'
+import RosterManagement from './components/admin/RosterManagement'
+import TeamEditor from './components/admin/TeamEditor'
+import BulkImportGames from './components/admin/BulkImportGames'
+import MiniTournament from './components/admin/MiniTournament'
+import Diagnostics from './components/admin/Diagnostics'
 import { listHistory, removeHistoryEntry, newHistoryId } from './protocolHistory'
 import sampleProtocolImg from './assets/sample-protocol-preview.png'
 
@@ -27,17 +33,35 @@ export default function App() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
   const [result, setResult] = useState(null)
-  const [saveState, setSaveState] = useState('idle') // idle | saving | saved | failed
-  const [saveResult, setSaveResult] = useState(null)
   const [creatingNew, setCreatingNew] = useState(false)
   const [manualEntry, setManualEntry] = useState(false)
+  // null = home screen. Anything else = one specific admin tool open,
+  // picked directly from the sectioned cards on the home screen (see
+  // toolSections.js) - no separate menu step. A tool's own "Aizvērt" goes
+  // back to null; the header's "← Atpakaļ" (handleCancel) does the same via
+  // handleReset, same as every other flow in this file.
+  const [adminScreen, setAdminScreen] = useState(null)
+  // Extra props for whichever admin screen is open - only ever populated
+  // by GlobalSearch's "jump straight to this team/game" results
+  // (initialTeamId/initialGameId); every other way of opening a tool
+  // starts blank.
+  const [adminScreenParams, setAdminScreenParams] = useState({})
+  function openAdminScreen(key, params = {}) {
+    setAdminScreenParams(params)
+    setAdminScreen(key)
+  }
   const manualProtocolRef = useRef(null)
-  // Which history entry ManualProtocol is currently attached to - a
-  // fresh id for a brand-new protocol, or an existing entry's own id +
-  // its saved data when resuming a draft from the list below. Refreshed
-  // from localStorage every time the main screen is shown (mount, and
-  // whenever handleReset returns here), not kept live while the child is
-  // open - it autosaves to the SAME id, so nothing is lost either way.
+  // Same dirty-tracking contract every admin tool screen now implements
+  // via forwardRef: { isDirty(), hasDraftSafety()? } - see handleCancel.
+  const adminScreenRef = useRef(null)
+  // Which history entry the currently-open GameEditor is attached to - a
+  // fresh id whenever it opens fresh (manual entry, a new PDF upload that
+  // matched an existing game, or "Izveidot jaunu spēli" for one that
+  // didn't), or an existing entry's own id + its saved data when resuming
+  // a draft from the list below. Refreshed from localStorage every time
+  // the main screen is shown (mount, and whenever handleReset returns
+  // here), not kept live while the child is open - it autosaves to the
+  // SAME id, so nothing is lost either way.
   const [historyList, setHistoryList] = useState(() => listHistory())
   const [activeHistoryId, setActiveHistoryId] = useState(null)
   const [activeHistoryData, setActiveHistoryData] = useState(null)
@@ -56,9 +80,13 @@ export default function App() {
   // React modal never triggers a native dialog at all, so this class of
   // bug can't happen. `askConfirm` returns a Promise instead of
   // blocking synchronously, resolved by whichever button gets clicked.
-  const [confirmState, setConfirmState] = useState(null) // { message, resolve } | null
-  function askConfirm(message) {
-    return new Promise((resolve) => setConfirmState({ message, resolve }))
+  const [confirmState, setConfirmState] = useState(null) // { message, danger, resolve } | null
+  // `danger: true` renders the message in red - reserved for the one case
+  // that actually matters (leaving would genuinely discard unsaved data
+  // with no autosave behind it). Every other confirm in this file is a
+  // neutral "are you sure", not a warning.
+  function askConfirm(message, { danger = false } = {}) {
+    return new Promise((resolve) => setConfirmState({ message, danger, resolve }))
   }
   function answerConfirm(answer) {
     confirmState?.resolve(answer)
@@ -126,7 +154,16 @@ export default function App() {
       const seasonId = lookups?.seasonCombos[seasonIndex]?.seasonId
       const body = await parseProtocol(path ?? filePath, gameId, gameId ? undefined : seasonId)
       setResult(body)
-      setSaveState('idle')
+      // A matched game drops straight into GameEditor (no extra click, see
+      // render below) - give it a fresh history entry right away, same as
+      // handleStartManualEntry does, so its autosave/dirty-tracking works
+      // uniformly regardless of how the editor was opened. The unmatched
+      // ("creatingNew") path gets its own historyId only once that button
+      // is actually clicked, below.
+      if (body.status === 'matched') {
+        setActiveHistoryId(newHistoryId())
+        setActiveHistoryData(null)
+      }
     } catch (err) {
       setError(err.message)
     } finally {
@@ -134,32 +171,14 @@ export default function App() {
     }
   }
 
-  async function handleSave({ baltichockeyUrl, bestPlayers } = {}) {
-    setSaveState('saving')
-    try {
-      // Always sent as a full overwrite (blank clears it) rather than a
-      // sparse patch - same convention already used for the stats table
-      // writes this payload also carries.
-      const payload = {
-        ...result.payload,
-        _lach_baltichockey_url: baltichockeyUrl || '',
-        _lach_best_players: JSON.stringify((bestPlayers || []).map((s) => s.trim()).filter(Boolean)),
-      }
-      await saveGame(result.game_id, payload)
-      setSaveState('saved')
-    } catch (err) {
-      setSaveState('failed')
-      setSaveResult(err.message)
-    }
-  }
-
   function handleReset() {
     setFilePath(null)
     setResult(null)
     setError(null)
-    setSaveState('idle')
     setCreatingNew(false)
     setManualEntry(false)
+    setAdminScreen(null)
+    setAdminScreenParams({})
     setActiveHistoryId(null)
     setActiveHistoryData(null)
     setHistoryList(listHistory())
@@ -196,21 +215,24 @@ export default function App() {
   }
 
   // Only ever offered while nothing has actually been sent to WordPress
-  // yet (every call site below hides/disables this once saveState is
+  // yet (GameEditor's own saveState hides/disables this once it's
   // 'saving') - once a save request is in flight, cancelling the CLIENT
   // side wouldn't reliably stop it: PHP keeps running a request to
   // completion by default even if the caller gives up waiting, so a
   // "cancel" at that point could look like it worked while the write
   // still happens. Safer to just not offer it there than to fake it.
   //
-  // Manual entry is a genuinely different case, once it exists: it
-  // autosaves its own draft, so "you'll lose everything" is usually just
-  // false - only ask when there's a real, not-yet-persisted change (the
-  // ref's isDirty), and word it as a save prompt rather than a data-loss
-  // warning. Answering yes force-flushes that draft before leaving, so
-  // it's never a race against the ~800ms debounce.
+  // GameEditor autosaves its own draft (now regardless of whether it was
+  // opened via manual entry, a PDF that matched nothing, or a PDF that
+  // matched an existing game - all three get a historyId, see handleParse/
+  // the "Izveidot jaunu spēli" button below), so "you'll lose everything"
+  // is usually just false - only ask when there's a real, not-yet-
+  // persisted change (the ref's isDirty), and word it as a save prompt
+  // rather than a data-loss warning. Answering yes force-flushes that
+  // draft before leaving, so it's never a race against the ~800ms debounce.
   async function handleCancel() {
-    if (manualEntry && manualProtocolRef.current) {
+    const editorOpen = manualEntry || creatingNew || result?.status === 'matched'
+    if (editorOpen && manualProtocolRef.current) {
       if (!manualProtocolRef.current.isDirty()) {
         handleReset()
         return
@@ -221,16 +243,39 @@ export default function App() {
       }
       return
     }
+    // Same contract, for whichever admin tool screen is open (schedule/
+    // roster/team-editor/bulk-import/mini-tournament/diagnostics - see
+    // each file's own useImperativeHandle). `hasDraftSafety()` means the
+    // screen autosaves its own draft (roster/bulk-import/mini-tournament),
+    // so leaving never loses anything worth warning about - just go.
+    // Otherwise, only warn when something was actually entered, and only
+    // THEN in the red "this will not be saved" tone - never for a screen
+    // nothing was typed into yet.
+    if (adminScreen && adminScreenRef.current) {
+      if (adminScreenRef.current.hasDraftSafety?.() || !adminScreenRef.current.isDirty()) {
+        handleReset()
+        return
+      }
+      if (await askConfirm('Aizverot šo, ievadītie dati NETIKS saglabāti. Vai tiešām vēlies iziet?', { danger: true })) {
+        handleReset()
+      }
+      return
+    }
     if (await askConfirm('Vai tiešām vēlies atcelt? Neviena informācija netiks saglabāta.')) {
       handleReset()
     }
   }
 
   const hasCredentials = credentials?.username && credentials?.appPassword && !revalidationError
+  // Same exact-match convention as GameEditor.jsx's own isDevUser - gates
+  // DEV_TOOLS (raw diagnostics) to one personal login, now that
+  // GlobalSearch covers the everyday "find and fix something" need for
+  // everyone else.
+  const isKikis = (credentials?.username || '').trim().toLowerCase() === 'kikis'
   // Whether there's actually somewhere to go "back" FROM - same
   // condition the explicit back button (below) uses to decide whether
   // to show itself at all.
-  const hasSomethingOpen = Boolean(filePath || result || creatingNew || manualEntry)
+  const hasSomethingOpen = Boolean(filePath || result || creatingNew || manualEntry || adminScreen)
 
   // Logo click = same "go back" action as the explicit button - kept
   // working for muscle memory, but per explicit feedback ("not obvious
@@ -270,7 +315,7 @@ export default function App() {
                 hasCredentials ? 'cursor-pointer hover:opacity-80 transition-opacity' : ''
               }`}
             >
-              LACH <span className="text-accent">Protokolu Rīks</span>
+              LACH <span className="text-accent">Administrēšana</span>
             </h1>
           </div>
           <div className="flex items-center gap-4">
@@ -323,11 +368,11 @@ export default function App() {
           />
         ) : (
           <>
-            {!result && !manualEntry && (
+            {!result && !manualEntry && !adminScreen && (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-stretch">
                 <div className="bg-card border border-line rounded-lg p-6 space-y-4 flex flex-col">
                   <div>
-                    <h2 className="text-lg font-black uppercase text-ink tracking-wide">Augšupielādēt protokolu</h2>
+                    <h2 className="text-lg font-black uppercase text-ink tracking-wide">📄 Augšupielādēt protokolu</h2>
                     <p className="text-ink-faint text-sm mt-1">
                       Tikai PDF formātā - oficiālais elektroniskais protokols, ko sistēma automātiski nolasa un sasaista ar spēli.
                     </p>
@@ -381,9 +426,10 @@ export default function App() {
 
                 <div className="bg-card border border-line rounded-lg p-6 space-y-4 flex flex-col">
                   <div>
-                    <h2 className="text-lg font-black uppercase text-ink tracking-wide">Ievadīt protokolu ar roku</h2>
+                    <h2 className="text-lg font-black uppercase text-ink tracking-wide">✍️ Izveidot / labot spēli</h2>
                     <p className="text-ink-faint text-sm mt-1">
-                      Nav PDF faila? Ievadi tos pašus laukus pats, tāpat kā uz papīra.
+                      Nav PDF faila vai gribi ievadīt visu pats: izveido jaunu spēli vai pievieno rezultātu
+                      jau ieplānotai, tāpat kā uz papīra.
                     </p>
                   </div>
                   <div className="mt-auto">
@@ -392,14 +438,38 @@ export default function App() {
                       onClick={handleStartManualEntry}
                       className="bg-accent text-ink font-bold uppercase text-sm tracking-wide px-6 py-3 rounded-lg hover:bg-red-600 hover:scale-[1.02] active:scale-[0.98] transition-all"
                     >
-                      Ievadīt ar roku
+                      Izveidot spēli
                     </button>
                   </div>
                 </div>
               </div>
             )}
 
-            {!result && !manualEntry && historyList.length > 0 && (
+            {!result && !manualEntry && !adminScreen && (
+              <GlobalSearch lookups={lookups} onNavigate={openAdminScreen} />
+            )}
+
+            {!result && !manualEntry && !adminScreen && (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {FREQUENT_TOOLS.map((t) => (
+                  <ToolCard key={t.key} tool={t} onClick={() => openAdminScreen(t.key)} />
+                ))}
+              </div>
+            )}
+
+            {!result && !manualEntry && !adminScreen && (
+              <hr className="border-t border-line" />
+            )}
+
+            {!result && !manualEntry && !adminScreen && (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {[...RARE_TOOLS, ...(isKikis ? DEV_TOOLS : [])].map((t) => (
+                  <ToolCard key={t.key} tool={t} onClick={() => openAdminScreen(t.key)} />
+                ))}
+              </div>
+            )}
+
+            {!result && !manualEntry && !adminScreen && historyList.length > 0 && (
               <div className="bg-card border border-line rounded-lg p-6 space-y-3">
                 <h2 className="text-lg font-black uppercase text-ink tracking-wide">Protokolu vēsture</h2>
                 <div className="space-y-2">
@@ -457,7 +527,7 @@ export default function App() {
             )}
 
             {manualEntry && (
-              <ManualProtocol
+              <GameEditor
                 ref={manualProtocolRef}
                 lookups={lookups}
                 initialSeasonIndex={seasonIndex}
@@ -476,7 +546,11 @@ export default function App() {
                   <div className="text-center">
                     <button
                       type="button"
-                      onClick={() => setCreatingNew(true)}
+                      onClick={() => {
+                        setActiveHistoryId(newHistoryId())
+                        setActiveHistoryData(null)
+                        setCreatingNew(true)
+                      }}
                       className="text-accent text-sm font-semibold hover:underline"
                     >
                       Šī spēle vēl nemaz nepastāv WordPress - izveidot jaunu spēli
@@ -487,35 +561,95 @@ export default function App() {
             )}
 
             {result && result.status === 'none' && creatingNew && (
-              <CreateNewGame
-                filePath={filePath}
-                parsedTeams={result.parsedTeams}
-                meta={result.parsedMeta}
+              <GameEditor
+                ref={manualProtocolRef}
                 lookups={lookups}
                 initialSeasonIndex={seasonIndex}
+                credentials={credentials}
+                historyId={activeHistoryId}
+                initialData={activeHistoryData}
+                prefill={{ filePath, meta: result.parsedMeta, parsedTeams: result.parsedTeams }}
                 onCancel={handleCancel}
+                askConfirm={askConfirm}
               />
             )}
 
             {result && result.status === 'matched' && (
-              <PreviewGame
-                result={result}
-                saveState={saveState}
-                saveResult={saveResult}
-                onSave={handleSave}
+              <GameEditor
+                ref={manualProtocolRef}
+                lookups={lookups}
+                initialSeasonIndex={seasonIndex}
+                credentials={credentials}
+                historyId={activeHistoryId}
+                initialData={activeHistoryData}
+                prefill={{ filePath, matched: result }}
                 onCancel={handleCancel}
-                onOpenExternal={openExternal}
+                askConfirm={askConfirm}
               />
             )}
+
+            {adminScreen === 'schedule' && (
+              <ScheduleCorrection
+                ref={adminScreenRef}
+                lookups={lookups}
+                initialGameId={adminScreenParams.initialGameId}
+                onCancel={handleCancel}
+              />
+            )}
+            {adminScreen === 'roster' && (
+              <RosterManagement
+                ref={adminScreenRef}
+                lookups={lookups}
+                initialTeamId={adminScreenParams.initialTeamId}
+                onCancel={handleCancel}
+                askConfirm={askConfirm}
+              />
+            )}
+            {adminScreen === 'teamEditor' && (
+              <TeamEditor
+                ref={adminScreenRef}
+                lookups={lookups}
+                initialTeamId={adminScreenParams.initialTeamId}
+                onCancel={handleCancel}
+              />
+            )}
+            {adminScreen === 'bulkImport' && (
+              <BulkImportGames ref={adminScreenRef} lookups={lookups} onCancel={handleCancel} />
+            )}
+            {adminScreen === 'miniTournament' && (
+              <MiniTournament ref={adminScreenRef} lookups={lookups} onCancel={handleCancel} />
+            )}
+            {adminScreen === 'diagnostics' && <Diagnostics ref={adminScreenRef} onCancel={handleCancel} />}
           </>
         )}
       </main>
 
       {confirmState && (
-        <ConfirmModal message={confirmState.message} onYes={() => answerConfirm(true)} onNo={() => answerConfirm(false)} />
+        <ConfirmModal
+          message={confirmState.message}
+          danger={confirmState.danger}
+          onYes={() => answerConfirm(true)}
+          onNo={() => answerConfirm(false)}
+        />
       )}
       {showSampleProtocol && <SampleProtocolModal onClose={() => setShowSampleProtocol(false)} />}
     </div>
+  )
+}
+
+function ToolCard({ tool, onClick }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="text-left bg-card border border-line rounded-lg p-5 space-y-2 hover:border-accent transition-colors"
+    >
+      <h3 className="text-base font-black uppercase text-ink tracking-wide">
+        {tool.icon && <span className="mr-2">{tool.icon}</span>}
+        {tool.title}
+      </h3>
+      <p className="text-ink-faint text-sm">{tool.desc}</p>
+    </button>
   )
 }
 
@@ -553,11 +687,11 @@ function SampleProtocolModal({ onClose }) {
   )
 }
 
-function ConfirmModal({ message, onYes, onNo }) {
+function ConfirmModal({ message, danger, onYes, onNo }) {
   return (
     <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4">
       <div className="bg-card border border-line-strong rounded-lg shadow-xl p-6 max-w-sm w-full space-y-4">
-        <p className="text-ink text-sm">{message}</p>
+        <p className={danger ? 'text-red-400 text-sm font-bold' : 'text-ink text-sm'}>{message}</p>
         <div className="flex justify-end gap-3">
           <button
             type="button"

@@ -2,7 +2,7 @@
   "name": "lach-protokolu-riks",
   "productName": "LACH Protokolu Rīks",
   "private": true,
-  "version": "0.3.13",
+  "version": "0.4.0",
   "type": "module",
   "main": "electron/main.mjs",
   "scripts": {
@@ -28,8 +28,8 @@
   },
   "build": {
     "appId": "lv.lach.protokolu-riks",
-    "productName": "LACH Protokolu Rīks",
-    "artifactName": "LACH-Protokolu-Riks-Setup.${ext}",
+    "productName": "LACH Administrēšana",
+    "artifactName": "LACH-Administresana-Setup.${ext}",
     "publish": {
       "provider": "github",
       "owner": "kikis118",

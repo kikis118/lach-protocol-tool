@@ -1,5 +1,8 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react'
-import { createManualGamePreview, createMissingPlayers, createNewGameSave, finishScheduledGame, getLookups, openExternal } from '../api'
+import {
+  createManualGamePreview, createMissingPlayers, createNewGamePreview, createNewGameSave, finishScheduledGame, saveGame,
+  getLookups, openExternal, pickAttachment, uploadAttachment,
+} from '../api'
 import { PeriodScoresTable, BoxScoreTable, GoalsList, PenaltiesList } from './GameSummary'
 import { upsertHistoryEntry } from '../protocolHistory'
 
@@ -169,12 +172,13 @@ function DevTools({ credentials, homeTeamName, awayTeamName, onRestoreAll }) {
   )
 }
 
-// Manual entry for a game whose protocol only exists as a handwritten
-// paper sheet (photographed/WhatsApp'd, not a real digital PDF) - e.g.
-// EAHF 2026's paper protocols. Mirrors that paper form's own fields
-// (roster, Vārti/goals, Sodi/penalties, per team) rather than inventing a
-// simplified shape, on the explicit ask that the digital form stay
-// recognizable to whoever is transcribing from the photo.
+// The one screen for creating or editing a game, regardless of how it got
+// here - blank hand entry, a PDF that matched nothing (prefilled, still
+// needs season/venue/team mapping), or a PDF that matched an existing WP
+// game (prefilled, game already scheduled). Previously three separate
+// components (ManualProtocol/CreateNewGame/PreviewGame) with three
+// different UIs depending on entry path - unified per explicit ask so the
+// same screen always shows up, just with different starting data.
 //
 // Deliberately builds a `parsed` object shaped EXACTLY like
 // parseProtocol.mjs's parseProtocolItems() output (teamA/teamB rosters,
@@ -182,9 +186,11 @@ function DevTools({ credentials, homeTeamName, awayTeamName, onRestoreAll }) {
 // game:createManualPreview -> buildNewGamePreview() pipeline the real PDF
 // path uses (see buildNewGamePreview.mjs) - every downstream piece
 // (jersey/name resolution against the team's WP roster, stats payload
-// building, win/loss/points math) is reused completely unchanged. This
-// file's only real job is collecting that same data by hand instead of by
-// text extraction.
+// building, win/loss/points math) is reused completely unchanged, whether
+// the rows were typed by hand or seeded from a real parsed PDF (see
+// rowsFromParsed below). This file's own job is just collecting/showing
+// that data - the actual stats computation always happens server-side
+// (main.mjs) from the same row shape either way.
 
 const SITUATIONS = [
   { value: '', label: '—' },
@@ -216,6 +222,61 @@ function kickoffToInputValue(kickoff) {
   return (kickoff || '').replace(' ', 'T').slice(0, 16)
 }
 
+// Best-effort only - just saves a click when the protocol's printed venue
+// name happens to match an existing one exactly (case/whitespace aside).
+// Never assumed correct without the admin seeing/confirming it in the
+// dropdown - this only pre-selects, it doesn't skip the picker.
+function guessVenueId(venues, printedVenue) {
+  if (!printedVenue) return ''
+  const norm = (s) => s.trim().toLowerCase()
+  const match = venues.find((v) => norm(v.name) === norm(printedVenue))
+  return match?.id || ''
+}
+
+// Inverse of buildParsed() below - seeds row state FROM a raw parsed-
+// protocol object (parseProtocolItems() shape: name/jersey-based, not yet
+// resolved to WP player ids). Used when opening this editor prefilled
+// from a real PDF, whether it matched an existing game or not - never for
+// blank manual entry, which starts from empty arrays as before.
+// aIsHome: true if parsed.teamA is the home team (false if teamB is) -
+// the protocol's own printed A/B order never reliably matches WP's home/
+// away, so this must come from whoever resolved the match (buildPreview's
+// own aIsHome) or from the admin's own team-mapping choice (unmatched case).
+function rowsFromParsed(parsed, aIsHome) {
+  const homeSide = aIsHome ? 'A' : 'B'
+  const awaySide = aIsHome ? 'B' : 'A'
+  const toRoster = (players) => (players || []).map((p) => ({ id: uid(), jersey: p.jersey || '', name: p.name || '', poz: '' }))
+  const toGoals = (side) =>
+    (parsed.goals || [])
+      .filter((g) => g.team === side)
+      .map((g) => ({
+        id: uid(), time: g.time || '', scorerJersey: g.scorerJersey || '',
+        assist1Jersey: g.assist1Jersey || '', assist2Jersey: g.assist2Jersey || '', situation: g.situation || '',
+      }))
+  const toPenalties = (side) =>
+    (parsed.penalties || [])
+      .filter((p) => p.team === side)
+      .map((p) => ({
+        id: uid(), jersey: p.jersey || '', minutes: p.minutes != null ? String(p.minutes) : '',
+        infraction: p.infraction || '', slStart: p.slStart || '', blEnd: p.blEnd || '',
+      }))
+
+  return {
+    homeRoster: toRoster(aIsHome ? parsed.teamA?.players : parsed.teamB?.players),
+    awayRoster: toRoster(aIsHome ? parsed.teamB?.players : parsed.teamA?.players),
+    homeGoals: toGoals(homeSide),
+    awayGoals: toGoals(awaySide),
+    homePenalties: toPenalties(homeSide),
+    awayPenalties: toPenalties(awaySide),
+    goalieChanges: (parsed.goalieChanges || []).map((g) => ({
+      id: uid(),
+      time: g.time || '',
+      homeJersey: (aIsHome ? g.goalieAJersey : g.goalieBJersey) || '',
+      awayJersey: (aIsHome ? g.goalieBJersey : g.goalieAJersey) || '',
+    })),
+  }
+}
+
 const EMPTY_LOOKUPS = { seasonCombos: [], teams: [], venues: [], teamDetails: {}, games: [] }
 
 // A fresh/tournament-only team's roster (e.g. an EAHF international
@@ -230,8 +291,8 @@ const EMPTY_LOOKUPS = { seasonCombos: [], teams: [], venues: [], teamDetails: {}
 // historical roster rather than this game's actual lineup.
 const LARGE_ROSTER_THRESHOLD = 20
 
-const ManualProtocol = forwardRef(function ManualProtocol(
-  { lookups = EMPTY_LOOKUPS, initialSeasonIndex, credentials = null, historyId, initialData = null, onCancel, askConfirm },
+const GameEditor = forwardRef(function GameEditor(
+  { lookups = EMPTY_LOOKUPS, initialSeasonIndex, credentials = null, historyId, initialData = null, prefill = null, onCancel, askConfirm },
   ref,
 ) {
   const [error, setError] = useState(null)
@@ -253,22 +314,54 @@ const ManualProtocol = forwardRef(function ManualProtocol(
     flushDraft: () => persistDraft(),
   }))
 
+  // `prefill` (from App.jsx, only set when this screen was opened from an
+  // uploaded PDF) comes in two shapes:
+  //   { filePath, matched: <protocol:parse's 'matched' result> }
+  //     - PDF matched an existing WP game. No team-mapping needed - mode
+  //       goes straight to 'matched'.
+  //   { filePath, meta, parsedTeams: {a, b} }
+  //     - PDF matched nothing. Needs the admin to map printed names A/B to
+  //       real WP teams + which one played home, THEN behaves exactly like
+  //       mode 'new' (season/venue/kickoff, all editable, just prefilled).
+  // Team-mapping state only meaningful for the second shape.
+  const needsTeamMapping = Boolean(prefill && !prefill.matched && !draft)
+  const [mappedA, setMappedA] = useState('')
+  const [mappedB, setMappedB] = useState('')
+  const [homeIsA, setHomeIsA] = useState(true)
+  const [mappingResolved, setMappingResolved] = useState(!needsTeamMapping)
+  const [loadingPdfRows, setLoadingPdfRows] = useState(false)
+  // The ORIGINAL automated parser's own confidence signals - shown once as
+  // an informational banner, separate from this form's own live self-check
+  // (buildParsed's qa, computed from whatever is in the rows right now).
+  // Never recomputed after the initial prefill - it's a record of what the
+  // parser itself found, not a live check.
+  const [parserNotice, setParserNotice] = useState(null) // { qa, notes } | null
+
   // 'pick' = choosing between an already-scheduled game or "new"; 'existing'
   // = attached to a real game_id (finish-scheduled-game.php, on save);
-  // 'new' = the old always-create-a-post path (create-finished-game.php).
+  // 'new' = the old always-create-a-post path (create-finished-game.php);
+  // 'matched' = a PDF auto-matched an existing game (game-autofill.php via
+  // game:save, same as the retired PreviewGame.jsx used).
   // Always defaults to 'pick' unless a draft already recorded an explicit
-  // choice - an older draft (saved before this existed) still has all its
-  // roster/goals data intact either way, it just goes through the picker
-  // once more (harmless - "Nav spēles? Taisīt jaunu" gets it straight
-  // back to exactly what it had).
-  const [mode, setMode] = useState(draft?.mode || 'pick')
-  const [existingGameId, setExistingGameId] = useState(draft?.existingGameId || '')
+  // choice, or a prefill already determines it - an older draft (saved
+  // before this existed) still has all its roster/goals data intact
+  // either way, it just goes through the picker once more (harmless -
+  // "Nav spēles? Taisīt jaunu" gets it straight back to exactly what it had).
+  const [mode, setMode] = useState(draft?.mode || (prefill?.matched ? 'matched' : prefill ? 'new' : 'pick'))
+  const [existingGameId, setExistingGameId] = useState(draft?.existingGameId || (prefill?.matched ? String(prefill.matched.game_id) : ''))
 
-  const [homeTeamId, setHomeTeamId] = useState(draft?.homeTeamId || '')
-  const [awayTeamId, setAwayTeamId] = useState(draft?.awayTeamId || '')
+  const [homeTeamId, setHomeTeamId] = useState(draft?.homeTeamId || (prefill?.matched ? String(prefill.matched.homeTeam.team_id) : ''))
+  const [awayTeamId, setAwayTeamId] = useState(draft?.awayTeamId || (prefill?.matched ? String(prefill.matched.awayTeam.team_id) : ''))
   const [seasonIndex, setSeasonIndex] = useState(draft?.seasonIndex ?? (initialSeasonIndex || ''))
-  const [venueId, setVenueId] = useState(draft?.venueId || '')
-  const [kickoff, setKickoff] = useState(draft?.kickoff || '')
+  // Both the matched and unmatched prefill shapes carry the printed
+  // date/time/venue via `meta` (parseProtocolMeta's output) - a matched
+  // game's own WP-scheduled kickoff/venue aren't part of buildPreview.mjs's
+  // report, so the protocol's own printed values are the best available
+  // guess either way. Never assumed correct without the admin seeing it -
+  // this only pre-fills, same as guessVenueId's own contract.
+  const prefillMeta = prefill?.matched?.meta || prefill?.meta
+  const [venueId, setVenueId] = useState(draft?.venueId || (prefillMeta ? guessVenueId(lookups.venues, prefillMeta.venue) : ''))
+  const [kickoff, setKickoff] = useState(draft?.kickoff || (prefillMeta ? toDatetimeLocal(prefillMeta.date, prefillMeta.time) : ''))
 
   const [homeRoster, setHomeRoster] = useState(draft?.homeRoster || [])
   const [awayRoster, setAwayRoster] = useState(draft?.awayRoster || [])
@@ -287,6 +380,19 @@ const ManualProtocol = forwardRef(function ManualProtocol(
   // buildNewGamePreview.mjs's own periodScores note).
   const [periodHome, setPeriodHome] = useState(draft?.periodHome || { p1: '', p2: '', p3: '' })
   const [periodAway, setPeriodAway] = useState(draft?.periodAway || { p1: '', p2: '', p3: '' })
+
+  // Fields no screen but PreviewGame.jsx could set before this - now
+  // available regardless of how the game got here. Prefilled from
+  // whatever's already saved on a matched game (a previous upload, or a
+  // manual wp-admin edit), same "never assumed, always checked" pattern
+  // the matched-game check itself already used.
+  const [baltichockeyUrl, setBaltichockeyUrl] = useState(draft?.baltichockeyUrl ?? prefill?.matched?.existingBaltichockeyUrl ?? '')
+  const [youtubeUrl, setYoutubeUrl] = useState(draft?.youtubeUrl ?? prefill?.matched?.existingYoutubeUrl ?? '')
+  const [bestPlayers, setBestPlayers] = useState(
+    draft?.bestPlayers ?? (prefill?.matched?.existingBestPlayers?.length ? prefill.matched.existingBestPlayers : ['', '', '']),
+  )
+  const [scanUrl, setScanUrl] = useState(draft?.scanUrl ?? prefill?.matched?.existingProtocolScanUrl ?? '')
+  const [scanUploadState, setScanUploadState] = useState('idle') // idle | uploading | failed
 
   const [loadingPreview, setLoadingPreview] = useState(false)
   const [preview, setPreview] = useState(null)
@@ -324,6 +430,60 @@ const ManualProtocol = forwardRef(function ManualProtocol(
     setExistingGameId('')
   }
 
+  // Once the admin maps printed team A/B to real WP teams (+ which one
+  // played home) for a PDF that matched no existing game, re-parse the
+  // same file (game:createNewPreview already does this - see below) to
+  // get raw row data, seed every row/season/venue/kickoff field from it,
+  // and drop into ordinary mode 'new' from then on - same screen, same
+  // save call, just pre-filled instead of blank.
+  async function resolveTeamMapping() {
+    setLoadingPdfRows(true)
+    setError(null)
+    try {
+      const aIsHome = homeIsA
+      const homeId = aIsHome ? mappedA : mappedB
+      const awayId = aIsHome ? mappedB : mappedA
+      const result = await createNewGamePreview({ filePath: prefill.filePath, homeTeamId: homeId, awayTeamId: awayId, aIsHome })
+      const rows = rowsFromParsed(result.rawParsed, aIsHome)
+      setHomeTeamId(homeId)
+      setAwayTeamId(awayId)
+      setHomeRoster(rows.homeRoster)
+      setAwayRoster(rows.awayRoster)
+      setHomeGoals(rows.homeGoals)
+      setAwayGoals(rows.awayGoals)
+      setHomePenalties(rows.homePenalties)
+      setAwayPenalties(rows.awayPenalties)
+      setGoalieChanges(rows.goalieChanges)
+      setParserNotice({ qa: result.rawParsed.qa, notes: result.notes || [] })
+      setMode('new')
+      setMappingResolved(true)
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setLoadingPdfRows(false)
+    }
+  }
+
+  // Matched-game prefill: rows come straight from the initial parse
+  // (App.jsx already has it via prefill.matched.rawParsed/aIsHome) - no
+  // extra round trip needed, unlike the unmatched case above which only
+  // gets team ids once the admin picks them.
+  const matchedRowsSeeded = useRef(false)
+  useEffect(() => {
+    if (!prefill?.matched || matchedRowsSeeded.current || draft) return
+    matchedRowsSeeded.current = true
+    const rows = rowsFromParsed(prefill.matched.rawParsed, prefill.matched.aIsHome)
+    setHomeRoster(rows.homeRoster)
+    setAwayRoster(rows.awayRoster)
+    setHomeGoals(rows.homeGoals)
+    setAwayGoals(rows.awayGoals)
+    setHomePenalties(rows.homePenalties)
+    setAwayPenalties(rows.awayPenalties)
+    setGoalieChanges(rows.goalieChanges)
+    setParserNotice({ qa: prefill.matched.rawParsed.qa, notes: [] })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
 // Upserts this SAME history entry (historyId, fixed for this screen's
   // whole lifetime) - never a different one, so autosave/explicit-save
   // and the final "mark it published" write below all land on the one
@@ -334,7 +494,11 @@ const ManualProtocol = forwardRef(function ManualProtocol(
   // real game_id once publishing succeeds.
   function persistDraft() {
     try {
-      const data = { mode, existingGameId, homeTeamId, awayTeamId, seasonIndex, venueId, kickoff, homeRoster, awayRoster, homeGoals, awayGoals, homePenalties, awayPenalties, goalieChanges, periodHome, periodAway }
+      const data = {
+        mode, existingGameId, homeTeamId, awayTeamId, seasonIndex, venueId, kickoff,
+        homeRoster, awayRoster, homeGoals, awayGoals, homePenalties, awayPenalties, goalieChanges,
+        periodHome, periodAway, baltichockeyUrl, youtubeUrl, bestPlayers, scanUrl,
+      }
       upsertHistoryEntry({
         id: historyId,
         status: saveState === 'saved' ? 'saved' : 'draft',
@@ -395,7 +559,7 @@ const ManualProtocol = forwardRef(function ManualProtocol(
   }, [
     mode, existingGameId, homeTeamId, awayTeamId, seasonIndex, venueId, kickoff,
     homeRoster, awayRoster, homeGoals, awayGoals, homePenalties, awayPenalties,
-    goalieChanges, periodHome, periodAway,
+    goalieChanges, periodHome, periodAway, baltichockeyUrl, youtubeUrl, bestPlayers, scanUrl,
   ])
 
   // Prefills each team's roster from its known WP roster the moment it's
@@ -403,9 +567,11 @@ const ManualProtocol = forwardRef(function ManualProtocol(
   // deletes the rows for anyone who didn't dress and adds a row for any
   // guest not on the WP roster yet, rather than retyping everyone from a
   // blank table. Skipped exactly once if a restored draft already had
-  // its own (possibly hand-edited) roster for that side - otherwise
-  // restoring a draft would immediately overwrite it with a fresh WP
-  // fetch, silently discarding whatever editing had already been done.
+  // its own (possibly hand-edited) roster for that side, AND whenever
+  // this screen was opened prefilled from a real PDF (rowsFromParsed
+  // above already seeded the actual game's roster - autoloading the
+  // team's WHOLE WP roster on top of that would silently discard exactly
+  // the data this screen exists to show).
   const toRosterRows = (roster) =>
     roster.map((p) => ({ id: uid(), jersey: p.number != null ? String(p.number) : '', name: p.name, poz: GROUP_TO_POZ[p.group] || '' }))
 
@@ -425,8 +591,8 @@ const ManualProtocol = forwardRef(function ManualProtocol(
     setRoster(toRosterRows(roster))
   }
 
-  const skipHomePrefill = useRef(Boolean(draft?.homeTeamId))
-  const skipAwayPrefill = useRef(Boolean(draft?.awayTeamId))
+  const skipHomePrefill = useRef(Boolean(draft?.homeTeamId) || Boolean(prefill))
+  const skipAwayPrefill = useRef(Boolean(draft?.awayTeamId) || Boolean(prefill))
   useEffect(() => {
     if (skipHomePrefill.current) { skipHomePrefill.current = false; return }
     const roster = lookups.teamDetails?.[homeTeamId]?.roster || []
@@ -490,7 +656,25 @@ const ManualProtocol = forwardRef(function ManualProtocol(
     }
   }
 
-  const canPreview = mode !== 'pick' && homeTeamId && awayTeamId && homeTeamId !== awayTeamId && seasonIndex !== '' && venueId && kickoff
+  async function handlePickScan() {
+    const filePath = await pickAttachment()
+    if (!filePath) return
+    setScanUploadState('uploading')
+    setError(null)
+    try {
+      const result = await uploadAttachment({ filePath })
+      setScanUrl(result.url)
+      setScanUploadState('idle')
+    } catch (err) {
+      setScanUploadState('failed')
+      setError(`Neizdevās augšupielādēt skenu: ${err.message}`)
+    }
+  }
+
+  const canPreview =
+    mode === 'matched'
+      ? homeTeamId && awayTeamId
+      : mode !== 'pick' && homeTeamId && awayTeamId && homeTeamId !== awayTeamId && seasonIndex !== '' && venueId && kickoff
 
   function buildParsed() {
     const toPlayers = (roster) => roster.filter((r) => r.name.trim()).map((r) => ({ name: r.name.trim(), jersey: r.jersey.trim() || null }))
@@ -615,44 +799,54 @@ const ManualProtocol = forwardRef(function ManualProtocol(
       // Only included once all 3 periods are filled for a side (see
       // buildParsed's own periodTotal) - a half-filled period breakdown
       // would be actively wrong to publish, not just incomplete.
-      // Previously this data never left the preview screen at all (the
-      // WP field it belongs in, _sl_scores_home/away, was either never
-      // touched or left as a hardcoded-empty placeholder) - confirmed
-      // missing live on game 1216's own period breakdown.
       const periodComplete = (p) => Boolean(p.p1.trim() && p.p2.trim() && p.p3.trim())
       const period_scores = (periodComplete(periodHome) || periodComplete(periodAway))
         ? { home: periodComplete(periodHome) ? periodHome : {}, away: periodComplete(periodAway) ? periodAway : {} }
         : null
-      const payload = period_scores ? { ...preview.payload, period_scores } : preview.payload
 
-      const result = mode === 'existing'
-        ? await finishScheduledGame({
-            gameId: existingGameId,
-            gameFields: preview.gameFields,
-            payload,
-          })
-        : await createNewGameSave({
-            seasonCombo: lookups.seasonCombos[seasonIndex],
-            homeTeamId,
-            awayTeamId,
-            venueId,
-            kickoff: fromDatetimeLocal(kickoff),
-            gameFields: preview.gameFields,
-            payload,
-          })
+      // Baltichockey/YouTube/best-players/scan fields are always sent as a
+      // full overwrite (blank clears them), same convention already used
+      // for the stats-table writes this payload also carries - never a
+      // sparse patch that could leave a stale value behind.
+      const extraFields = {
+        _lach_baltichockey_url: baltichockeyUrl || '',
+        _lach_youtube_url: youtubeUrl || '',
+        _lach_best_players: JSON.stringify(bestPlayers.map((s) => s.trim()).filter(Boolean)),
+        _lach_protocol_scan_url: scanUrl || '',
+      }
+      const payload = { ...preview.payload, ...(period_scores ? { period_scores } : {}), ...extraFields }
+
+      let result
+      if (mode === 'matched') {
+        result = await saveGame(existingGameId, payload)
+      } else if (mode === 'existing') {
+        result = await finishScheduledGame({ gameId: existingGameId, gameFields: preview.gameFields, payload })
+      } else {
+        result = await createNewGameSave({
+          seasonCombo: lookups.seasonCombos[seasonIndex],
+          homeTeamId,
+          awayTeamId,
+          venueId,
+          kickoff: fromDatetimeLocal(kickoff),
+          gameFields: preview.gameFields,
+          payload,
+        })
+      }
       setSaveState('saved')
-      setSaveResult(result)
+      setSaveResult(mode === 'matched' ? { game_id: existingGameId, ...result } : result)
     } catch (err) {
       setSaveState('failed')
       setSaveResult(err.message)
     }
   }
 
+  const showMappingStep = needsTeamMapping && !mappingResolved
+
   return (
     <div className="space-y-4">
       <div className="bg-card border border-line rounded-lg p-4 flex flex-wrap items-center justify-between gap-3">
-        <h2 className="text-lg font-black uppercase text-ink tracking-wide">Ievadīt protokolu ar roku</h2>
-        {!preview && (
+        <h2 className="text-lg font-black uppercase text-ink tracking-wide">Izveidot / labot spēli</h2>
+        {!preview && !showMappingStep && (
           <div className="flex items-center gap-2">
             {draftSavedAt && (
               <span className="text-ink-faint text-xs">
@@ -670,23 +864,71 @@ const ManualProtocol = forwardRef(function ManualProtocol(
         )}
       </div>
 
-      <DevTools
-        credentials={credentials}
-        homeTeamName={homeTeamName}
-        awayTeamName={awayTeamName}
-        onRestoreAll={(parsed) => {
-          setHomeRoster(parsed.home.roster)
-          setAwayRoster(parsed.away.roster)
-          if (parsed.full) {
-            setHomeGoals(parsed.home.goals)
-            setAwayGoals(parsed.away.goals)
-            setHomePenalties(parsed.home.penalties)
-            setAwayPenalties(parsed.away.penalties)
-          }
-        }}
-      />
+      {!showMappingStep && (
+        <DevTools
+          credentials={credentials}
+          homeTeamName={homeTeamName}
+          awayTeamName={awayTeamName}
+          onRestoreAll={(parsed) => {
+            setHomeRoster(parsed.home.roster)
+            setAwayRoster(parsed.away.roster)
+            if (parsed.full) {
+              setHomeGoals(parsed.home.goals)
+              setAwayGoals(parsed.away.goals)
+              setHomePenalties(parsed.home.penalties)
+              setAwayPenalties(parsed.away.penalties)
+            }
+          }}
+        />
+      )}
 
-      {!preview && (
+      {showMappingStep && (
+        <div className="bg-card border border-line rounded-lg p-6 space-y-4">
+          <p className="text-ink-faint text-sm">
+            Protokolā: <span className="text-ink font-semibold">{prefill.parsedTeams.a}</span> vs{' '}
+            <span className="text-ink font-semibold">{prefill.parsedTeams.b}</span>
+            {prefill.meta?.date && <> &middot; {prefill.meta.date} {prefill.meta.time}</>}
+          </p>
+          <Field label={`Kas ir "${prefill.parsedTeams.a}"?`}>
+            <TeamSelect teams={lookups.teams} value={mappedA} onChange={setMappedA} />
+          </Field>
+          <Field label={`Kas ir "${prefill.parsedTeams.b}"?`}>
+            <TeamSelect teams={lookups.teams} value={mappedB} onChange={setMappedB} />
+          </Field>
+          {mappedA && mappedB && mappedA !== mappedB && (
+            <Field label="Mājās spēlēja">
+              <select
+                value={homeIsA ? 'a' : 'b'}
+                onChange={(e) => setHomeIsA(e.target.value === 'a')}
+                className="w-full bg-surface border border-line-strong rounded-md px-3 py-2 text-ink text-sm focus:outline-none focus:border-accent"
+              >
+                <option value="a">{lookups.teams.find((t) => t.id === mappedA)?.name}</option>
+                <option value="b">{lookups.teams.find((t) => t.id === mappedB)?.name}</option>
+              </select>
+            </Field>
+          )}
+          <div className="flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              onClick={resolveTeamMapping}
+              disabled={!mappedA || !mappedB || mappedA === mappedB || loadingPdfRows}
+              className="bg-accent text-ink font-bold uppercase text-sm tracking-wide px-6 py-3 rounded-lg hover:bg-red-600 transition-colors disabled:opacity-50"
+            >
+              {loadingPdfRows ? 'Apstrādā...' : 'Turpināt'}
+            </button>
+            <button
+              type="button"
+              onClick={onCancel}
+              className="bg-card border border-line-strong text-ink-secondary hover:border-accent hover:text-ink font-bold uppercase text-xs tracking-wide px-6 py-3 rounded-lg transition-colors"
+            >
+              Atcelt
+            </button>
+          </div>
+          {error && <p className="text-red-400 text-sm">{error}</p>}
+        </div>
+      )}
+
+      {!showMappingStep && !preview && (
         <>
           {mode === 'pick' && (
             <div className="bg-card border border-line rounded-lg p-6 space-y-4">
@@ -738,30 +980,38 @@ const ManualProtocol = forwardRef(function ManualProtocol(
             </div>
           )}
 
-          {mode === 'existing' && (
+          {(mode === 'existing' || mode === 'matched') && (
             <div className="bg-card border border-line rounded-lg p-4 flex flex-wrap items-center justify-between gap-3">
               <div>
-                <p className="text-xs uppercase tracking-wide text-ink-faint font-semibold mb-1">Ieplānotā spēle</p>
-                <p className="text-ink font-bold">{homeTeamName} vs {awayTeamName}</p>
-                <p className="text-ink-faint text-sm">
-                  {kickoff.replace('T', ' ')} &middot; {lookups.venues.find((v) => v.id === venueId)?.name}
+                <p className="text-xs uppercase tracking-wide text-ink-faint font-semibold mb-1">
+                  {mode === 'matched' ? 'Sasaistīta spēle (no protokola)' : 'Ieplānotā spēle'}
                 </p>
+                <p className="text-ink font-bold">{homeTeamName} vs {awayTeamName}</p>
+                {kickoff && (
+                  <p className="text-ink-faint text-sm">
+                    {kickoff.replace('T', ' ')} {venueId && <>&middot; {lookups.venues.find((v) => v.id === venueId)?.name}</>}
+                  </p>
+                )}
               </div>
-              <button type="button" onClick={backToPicker} className="text-accent text-sm font-semibold hover:underline">
-                Mainīt izvēli
-              </button>
+              {mode === 'existing' && (
+                <button type="button" onClick={backToPicker} className="text-accent text-sm font-semibold hover:underline">
+                  Mainīt izvēli
+                </button>
+              )}
             </div>
           )}
 
           {mode === 'new' && (
             <div className="bg-card border border-line rounded-lg p-6 space-y-4">
-              <button
-                type="button"
-                onClick={backToPicker}
-                className="text-ink-faint text-xs font-semibold hover:text-ink-secondary transition-colors"
-              >
-                &larr; Atpakaļ pie ieplānoto spēļu saraksta
-              </button>
+              {!prefill && (
+                <button
+                  type="button"
+                  onClick={backToPicker}
+                  className="text-ink-faint text-xs font-semibold hover:text-ink-secondary transition-colors"
+                >
+                  &larr; Atpakaļ pie ieplānoto spēļu saraksta
+                </button>
+              )}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <Field label="Mājas komanda">
                   <TeamSelect teams={lookups.teams} value={homeTeamId} onChange={setHomeTeamId} />
@@ -817,6 +1067,18 @@ const ManualProtocol = forwardRef(function ManualProtocol(
             </div>
           )}
 
+          {parserNotice && (parserNotice.qa?.goalCountMatches === false || parserNotice.notes.length > 0) && (
+            <div className="bg-amber-950/40 border border-amber-600/40 text-amber-300 text-sm rounded-lg px-4 py-3 space-y-1">
+              <p className="font-bold">Automātiskā parsēšana atrada šādas piezīmes:</p>
+              {parserNotice.qa?.goalCountMatches === false && (
+                <p>&bull; Protokola paškontrole neatbilst: itemizēto vārtu skaits nesakrīt ar protokolā uzdrukāto kopsummu. Pārbaudi rūpīgi.</p>
+              )}
+              {parserNotice.notes.map((n, i) => (
+                <p key={i}>&bull; {n}</p>
+              ))}
+            </div>
+          )}
+
           {mode !== 'pick' && (
           <>
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -855,6 +1117,18 @@ const ManualProtocol = forwardRef(function ManualProtocol(
             setPeriodHome={setPeriodHome}
             periodAway={periodAway}
             setPeriodAway={setPeriodAway}
+          />
+
+          <ExtraFieldsPanel
+            baltichockeyUrl={baltichockeyUrl}
+            setBaltichockeyUrl={setBaltichockeyUrl}
+            youtubeUrl={youtubeUrl}
+            setYoutubeUrl={setYoutubeUrl}
+            bestPlayers={bestPlayers}
+            setBestPlayers={setBestPlayers}
+            scanUrl={scanUrl}
+            onPickScan={handlePickScan}
+            scanUploadState={scanUploadState}
           />
 
           <div className="flex flex-wrap items-center gap-3">
@@ -963,7 +1237,7 @@ const ManualProtocol = forwardRef(function ManualProtocol(
   )
 })
 
-export default ManualProtocol
+export default GameEditor
 
 // One team's own slice of the paper protocol: roster + its own Vārti
 // (goals) + Sodi (penalties) sub-tables, matching the paper's own
@@ -1282,6 +1556,75 @@ function GoalieChangesPanel({ rows, setRows }) {
         ))}
       </div>
       <AddRowButton onClick={addRow} label="+ Pievienot maiņu" />
+    </div>
+  )
+}
+
+// Baltichockey/YouTube/best-players/protocol-scan - previously only
+// available on an already-matched game (the old PreviewGame.jsx), now
+// available regardless of how the game got here.
+function ExtraFieldsPanel({
+  baltichockeyUrl, setBaltichockeyUrl, youtubeUrl, setYoutubeUrl,
+  bestPlayers, setBestPlayers, scanUrl, onPickScan, scanUploadState,
+}) {
+  function updateBestPlayer(i, value) {
+    setBestPlayers(bestPlayers.map((p, idx) => (idx === i ? value : p)))
+  }
+
+  return (
+    <div className="bg-card border border-line rounded-lg p-4 space-y-4">
+      <h3 className="text-ink-faint text-xs uppercase tracking-wide font-semibold">Papildu (nav obligāti)</h3>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <Field label="Baltichockey.tv saite">
+          <input
+            type="text"
+            value={baltichockeyUrl}
+            onChange={(e) => setBaltichockeyUrl(e.target.value)}
+            placeholder="https://baltichockey.tv/..."
+            className="w-full bg-surface border border-line-strong rounded-md px-3 py-2 text-ink text-sm focus:outline-none focus:border-accent"
+          />
+        </Field>
+        <Field label="YouTube saite">
+          <input
+            type="text"
+            value={youtubeUrl}
+            onChange={(e) => setYoutubeUrl(e.target.value)}
+            placeholder="https://youtube.com/..."
+            className="w-full bg-surface border border-line-strong rounded-md px-3 py-2 text-ink text-sm focus:outline-none focus:border-accent"
+          />
+        </Field>
+      </div>
+      <Field label="3 labākie spēlētāji">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+          {bestPlayers.map((p, i) => (
+            <input
+              key={i}
+              type="text"
+              value={p}
+              onChange={(e) => updateBestPlayer(i, e.target.value)}
+              placeholder={`${i + 1}. spēlētājs`}
+              className="w-full bg-surface border border-line-strong rounded-md px-3 py-2 text-ink text-sm focus:outline-none focus:border-accent"
+            />
+          ))}
+        </div>
+      </Field>
+      <Field label="Protokola skens (fotografēts/skenēts, ja bija rokrakstā)">
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={onPickScan}
+            disabled={scanUploadState === 'uploading'}
+            className="bg-card border border-line-strong text-ink-secondary hover:border-accent hover:text-ink font-bold uppercase text-xs tracking-wide px-4 py-2 rounded-lg transition-colors disabled:opacity-50"
+          >
+            {scanUploadState === 'uploading' ? 'Augšupielādē...' : scanUrl ? 'Aizvietot failu' : 'Pievienot failu'}
+          </button>
+          {scanUrl && (
+            <a href={scanUrl} target="_blank" rel="noreferrer" className="text-accent text-xs font-semibold hover:underline">
+              Skatīt pievienoto failu ↗
+            </a>
+          )}
+        </div>
+      </Field>
     </div>
   )
 }

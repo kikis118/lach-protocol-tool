@@ -271,6 +271,8 @@ ipcMain.handle('protocol:parse', async (_event, { filePath, gameId, seasonId }) 
   let alreadyHasDataCheckFailed = false
   let existingBaltichockeyUrl = ''
   let existingBestPlayers = []
+  let existingYoutubeUrl = ''
+  let existingProtocolScanUrl = ''
   try {
     const statusRes = await fetch(`${WP_API}/game-autofill/${game.game_id}`, { headers: { Authorization: wpAuthHeader() } })
     if (!statusRes.ok) throw new Error(`game-autofill status check: HTTP ${statusRes.status}`)
@@ -280,9 +282,11 @@ ipcMain.handle('protocol:parse', async (_event, { filePath, gameId, seasonId }) 
     )
     // Pre-fill from whatever's already saved on this game (a previous
     // upload, or a manual wp-admin edit) rather than always starting
-    // these two fields blank - same "never assumed, always checked"
-    // pattern as alreadyHasData just above.
+    // these fields blank - same "never assumed, always checked" pattern
+    // as alreadyHasData just above.
     existingBaltichockeyUrl = statusBody.meta?._lach_baltichockey_url || ''
+    existingYoutubeUrl = statusBody.meta?._lach_youtube_url || ''
+    existingProtocolScanUrl = statusBody.meta?._lach_protocol_scan_url || ''
     try {
       existingBestPlayers = JSON.parse(statusBody.meta?._lach_best_players || '[]')
     } catch {
@@ -302,6 +306,14 @@ ipcMain.handle('protocol:parse', async (_event, { filePath, gameId, seasonId }) 
     meta,
     existingBaltichockeyUrl,
     existingBestPlayers,
+    existingYoutubeUrl,
+    existingProtocolScanUrl,
+    // Raw parse (name/jersey-based, not yet resolved to WP player ids) -
+    // `report` above only carries the resolved/display-formatted version.
+    // Lets the unified game editor seed its own editable rows directly
+    // from what the parser found, same shape parseProtocolItems() always
+    // produces (see buildParsed() in GameEditor.jsx).
+    rawParsed: parsed,
   }
 })
 
@@ -374,6 +386,20 @@ ipcMain.handle('lookups:get', async () => {
     games: (data.games || []).map((g) => ({
       game_id: g.game_id, home_team: g.home_team, away_team: g.away_team,
       kickoff: g.kickoff, venue_id: g.venue_id, tournament_id: g.tournament_id, finished: g.finished,
+      // Only meaningful for a mini-tournament placeholder game (home_team
+      // or away_team === 0) - lets the resolve screen show "Winner of A1"
+      // instead of just a bare game id.
+      seed_home: data.game_details?.[g.game_id]?.seed_home || null,
+      seed_away: data.game_details?.[g.game_id]?.seed_away || null,
+    })),
+    // Only for GlobalSearch (src/components/admin/GlobalSearch.jsx) - a
+    // flat, searchable list of every player, each carrying which team
+    // they currently play for so a search result can jump straight to
+    // that team's roster screen.
+    players: Object.entries(data.players || {}).map(([id, name]) => ({
+      id,
+      name,
+      currentTeamId: data.player_details?.[id]?.current_team_id || null,
     })),
   }
 })
@@ -396,6 +422,10 @@ ipcMain.handle('game:createNewPreview', async (_event, { filePath, homeTeamId, a
     awayTeam: { name: teams[awayTeamId], team_id: awayTeamId },
     meta,
     parsedTeams: { a: parsed.teamA.name, b: parsed.teamB.name },
+    // Same rationale as protocol:parse's rawParsed above - lets the
+    // unified game editor seed its own editable rows from the parser's
+    // raw output instead of only getting the display-formatted preview.
+    rawParsed: parsed,
   }
 })
 
@@ -428,11 +458,14 @@ ipcMain.handle('game:createManualPreview', async (_event, { parsed, homeTeamId, 
 // actual WP-side logic. Lets the manual-entry flow skip the tedious
 // "go create each new international player in wp-admin first" step for
 // a brand-new team with no roster yet.
-ipcMain.handle('players:createMissing', async (_event, { teamId, players }) => {
+// `replace` defaults false so the manual-entry call site above (which never
+// passes it) keeps its existing append-only behavior - the standalone
+// roster-management screen is the only caller that ever sets it true.
+ipcMain.handle('players:createMissing', async (_event, { teamId, players, replace }) => {
   const res = await fetch(`${WP_API}/create-players/`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: wpAuthHeader() },
-    body: JSON.stringify({ team_id: teamId, players }),
+    body: JSON.stringify({ team_id: teamId, players, replace: Boolean(replace) }),
   })
   const body = await res.json()
   if (!res.ok) throw new Error(body.error || body.message || `HTTP ${res.status}`)
@@ -486,6 +519,218 @@ ipcMain.handle('game:createNewSave', async (_event, { seasonCombo, homeTeamId, a
       away_points: gameFields.away_points,
       ...payload,
     }),
+  })
+  const body = await res.json()
+  if (!res.ok) throw new Error(body.error || body.message || `HTTP ${res.status}`)
+  return body
+})
+
+// --- Admin: schedule correction -----------------------------------------
+//
+// Only ever touches an already-scheduled, not-yet-finished game's kickoff/
+// venue - update-game-schedule.php (lach-hockey-app repo) itself refuses
+// (409) to touch a finished game, on purpose: finishScheduledGame above is
+// the only path allowed to attach a result.
+ipcMain.handle('schedule:update', async (_event, { gameId, kickoff, venueId }) => {
+  const body = { kickoff }
+  if (venueId !== undefined && venueId !== null && venueId !== '') body.venue_id = venueId
+  const res = await fetch(`${WP_API}/update-game-schedule/${gameId}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: wpAuthHeader() },
+    body: JSON.stringify(body),
+  })
+  const responseBody = await res.json()
+  if (!res.ok) throw new Error(responseBody.error || responseBody.message || `HTTP ${res.status}`)
+  return responseBody
+})
+
+// --- Admin: read-only diagnostics ----------------------------------------
+//
+// Thin passthroughs to lach-diagnostics.php (lach-hockey-app repo) - all
+// GET, all scoped server-side to sl_* post types only, nothing here can
+// write anything.
+ipcMain.handle('diag:post', async (_event, { id }) => {
+  const res = await fetch(`${WP_API}/diag/post/${id}`, { headers: { Authorization: wpAuthHeader() } })
+  const body = await res.json()
+  if (!res.ok) throw new Error(body.error || body.message || `HTTP ${res.status}`)
+  return body
+})
+
+ipcMain.handle('diag:searchMeta', async (_event, { q }) => {
+  const res = await fetch(`${WP_API}/diag/search-meta?q=${encodeURIComponent(q)}`, {
+    headers: { Authorization: wpAuthHeader() },
+  })
+  const body = await res.json()
+  if (!res.ok) throw new Error(body.error || body.message || `HTTP ${res.status}`)
+  return body
+})
+
+ipcMain.handle('diag:tableRow', async (_event, { table, id }) => {
+  const res = await fetch(`${WP_API}/diag/table/${encodeURIComponent(table)}/${id}`, {
+    headers: { Authorization: wpAuthHeader() },
+  })
+  const body = await res.json()
+  if (!res.ok) throw new Error(body.error || body.message || `HTTP ${res.status}`)
+  return body
+})
+
+// --- Admin: team logo -----------------------------------------------------
+//
+// Two real HTTP calls, not one: WordPress's own native media upload has no
+// concept of "which team" (it's just /wp/v2/media), and team-logo.php has
+// no concept of file bytes (it only ever accepts an already-hosted URL) -
+// so this always uploads first, then points the team at whatever URL that
+// upload returned. WP's documented upload shape is a RAW body + a
+// Content-Disposition filename header, not multipart/form-data.
+const IMAGE_MIME_BY_EXT = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp' }
+const ATTACHMENT_MIME_BY_EXT = { ...IMAGE_MIME_BY_EXT, pdf: 'application/pdf' }
+
+// Shared by team logo upload and protocol-scan attachment - WP's
+// documented upload shape is a RAW body + a Content-Disposition filename
+// header, not multipart/form-data.
+async function uploadMediaToWp(filePath, mimeByExt) {
+  const ext = path.extname(filePath).slice(1).toLowerCase()
+  const mime = mimeByExt[ext]
+  if (!mime) throw new Error(`Neatbalstīts faila formāts: .${ext}`)
+  const buffer = fs.readFileSync(filePath)
+  const filename = path.basename(filePath)
+
+  const mediaRes = await fetch(`${WP_API.replace('/lach/v1', '')}/wp/v2/media`, {
+    method: 'POST',
+    headers: {
+      Authorization: wpAuthHeader(),
+      'Content-Type': mime,
+      'Content-Disposition': `attachment; filename="${filename}"`,
+    },
+    body: buffer,
+  })
+  const mediaBody = await mediaRes.json()
+  if (!mediaRes.ok) throw new Error(mediaBody.message || `Faila augšupielāde neizdevās: HTTP ${mediaRes.status}`)
+  return mediaBody
+}
+
+ipcMain.handle('dialog:pickImage', async () => {
+  const { canceled, filePaths } = await dialog.showOpenDialog({
+    filters: [{ name: 'Attēls', extensions: ['png', 'jpg', 'jpeg', 'webp'] }],
+    properties: ['openFile'],
+  })
+  if (canceled || filePaths.length === 0) return null
+  return filePaths[0]
+})
+
+ipcMain.handle('team:uploadLogo', async (_event, { teamId, filePath }) => {
+  const mediaBody = await uploadMediaToWp(filePath, IMAGE_MIME_BY_EXT)
+
+  const logoRes = await fetch(`${WP_API}/team-logo/${teamId}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: wpAuthHeader() },
+    body: JSON.stringify({ logo_url: mediaBody.source_url }),
+  })
+  const logoBody = await logoRes.json()
+  if (!logoRes.ok) throw new Error(logoBody.error || logoBody.message || `HTTP ${logoRes.status}`)
+  return logoBody
+})
+
+// --- Game editor: protocol-scan attachment, YouTube link -----------------
+//
+// A scanned/photographed handwritten protocol is purely a reference link
+// for admins (never parsed) - upload it to WP media same as a team logo,
+// then the caller stores the returned URL as a normal field in whatever
+// game payload it's about to save (_lach_protocol_scan_url).
+ipcMain.handle('dialog:pickAttachment', async () => {
+  const { canceled, filePaths } = await dialog.showOpenDialog({
+    filters: [{ name: 'Protokola skens', extensions: ['pdf', 'png', 'jpg', 'jpeg', 'webp'] }],
+    properties: ['openFile'],
+  })
+  if (canceled || filePaths.length === 0) return null
+  return filePaths[0]
+})
+
+ipcMain.handle('media:uploadAttachment', async (_event, { filePath }) => {
+  const mediaBody = await uploadMediaToWp(filePath, ATTACHMENT_MIME_BY_EXT)
+  return { url: mediaBody.source_url }
+})
+
+// --- Admin: bulk-import games (season setup) ------------------------------
+//
+// bulk-import-games.php always creates new sl_game posts and requires both
+// teams to already be real (non-zero) - unlike mini-tournament-games.php
+// below, it has no placeholder/TBD concept at all.
+ipcMain.handle('games:bulkImport', async (_event, { seasonId, tournamentId, stageId, leagueId, roundId, groupId, games }) => {
+  const res = await fetch(`${WP_API}/bulk-import-games/`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: wpAuthHeader() },
+    body: JSON.stringify({
+      season_id: seasonId,
+      tournament_id: tournamentId,
+      stage_id: stageId,
+      league_id: leagueId,
+      round_id: roundId,
+      group_id: groupId,
+      games,
+    }),
+  })
+  const body = await res.json()
+  if (!res.ok) throw new Error(body.error || body.message || `HTTP ${res.status}`)
+  return body
+})
+
+// --- Admin: mini-tournament (bracket) games -------------------------------
+//
+// Create supports placeholder teams (home_team/away_team === 0 + a
+// seed_home/seed_away label like "A1") for games whose real matchup isn't
+// known yet - that's what distinguishes this from bulk-import above.
+// Resolve fills in the real teams later; the endpoint itself refuses (409)
+// to resolve a game that already has both teams set.
+ipcMain.handle('miniTournament:create', async (_event, { seasonId, tournamentId, stageId, leagueId, games }) => {
+  const res = await fetch(`${WP_API}/mini-tournament-games/`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: wpAuthHeader() },
+    body: JSON.stringify({ season_id: seasonId, tournament_id: tournamentId, stage_id: stageId, league_id: leagueId, games }),
+  })
+  const body = await res.json()
+  if (!res.ok) throw new Error(body.error || body.message || `HTTP ${res.status}`)
+  return body
+})
+
+ipcMain.handle('miniTournament:resolve', async (_event, { gameId, homeTeamId, awayTeamId }) => {
+  const res = await fetch(`${WP_API}/mini-tournament-games/${gameId}/resolve`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: wpAuthHeader() },
+    body: JSON.stringify({ home_team: homeTeamId, away_team: awayTeamId }),
+  })
+  const body = await res.json()
+  if (!res.ok) throw new Error(body.error || body.message || `HTTP ${res.status}`)
+  return body
+})
+
+// --- Admin: team name ------------------------------------------------------
+//
+// update-team-name.php - new endpoint, mirrors team-logo.php's shape (one
+// field, one purpose). See wp-snippets/update-team-name.php in the
+// lach-hockey-app repo for the server side; as of writing this is written
+// but NOT YET deployed to the live server, so this call will 404 until
+// that FTP deploy happens.
+ipcMain.handle('team:updateName', async (_event, { teamId, name }) => {
+  const res = await fetch(`${WP_API}/update-team-name/${teamId}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: wpAuthHeader() },
+    body: JSON.stringify({ name }),
+  })
+  const body = await res.json()
+  if (!res.ok) throw new Error(body.error || body.message || `HTTP ${res.status}`)
+  return body
+})
+
+// Renames a player's OWN post in place - deliberately NOT the same path as
+// players:createMissing (create-players.php matches by name, so a
+// "corrected" name there would fork a new player post instead of fixing
+// this one - see update-player-name.php's own comment).
+ipcMain.handle('player:updateName', async (_event, { playerId, name }) => {
+  const res = await fetch(`${WP_API}/update-player-name/${playerId}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: wpAuthHeader() },
+    body: JSON.stringify({ name }),
   })
   const body = await res.json()
   if (!res.ok) throw new Error(body.error || body.message || `HTTP ${res.status}`)

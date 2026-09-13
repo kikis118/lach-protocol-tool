@@ -71,3 +71,55 @@ export function installUpdate() {
 export function onUpdateStatus(callback) {
   return window.lachTool.onUpdateStatus(callback)
 }
+
+export function updateSchedule(args) {
+  return window.lachTool.updateSchedule(args)
+}
+
+export function diagPost(id) {
+  return window.lachTool.diagPost(id)
+}
+
+export function diagSearchMeta(q) {
+  return window.lachTool.diagSearchMeta(q)
+}
+
+export function diagTableRow(table, id) {
+  return window.lachTool.diagTableRow(table, id)
+}
+
+export function pickImage() {
+  return window.lachTool.pickImage()
+}
+
+export function uploadTeamLogo(args) {
+  return window.lachTool.uploadTeamLogo(args)
+}
+
+export function pickAttachment() {
+  return window.lachTool.pickAttachment()
+}
+
+export function uploadAttachment(args) {
+  return window.lachTool.uploadAttachment(args)
+}
+
+export function bulkImportGames(args) {
+  return window.lachTool.bulkImportGames(args)
+}
+
+export function createMiniTournamentGames(args) {
+  return window.lachTool.createMiniTournamentGames(args)
+}
+
+export function resolveMiniTournamentGame(args) {
+  return window.lachTool.resolveMiniTournamentGame(args)
+}
+
+export function updateTeamName(args) {
+  return window.lachTool.updateTeamName(args)
+}
+
+export function updatePlayerName(args) {
+  return window.lachTool.updatePlayerName(args)
+}
